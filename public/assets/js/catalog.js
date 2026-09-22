@@ -295,5 +295,35 @@
     syncOrdersCount();
   }
 
+  /* ---------- Окно «Поставщики» по кнопке «?» ---------- */
+
+  var infoModal = document.getElementById('js-info');
+  var infoOpen = document.getElementById('js-info-open');
+
+  function toggleInfo(show) {
+    if (!infoModal) { return; }
+    infoModal.classList.toggle('is-hidden', !show);
+    document.body.style.overflow = show ? 'hidden' : '';
+    if (show) {
+      var close = infoModal.querySelector('.modal__close');
+      if (close) { close.focus(); }
+    } else if (infoOpen) {
+      infoOpen.focus();
+    }
+  }
+
+  if (infoOpen && infoModal) {
+    infoOpen.addEventListener('click', function () { toggleInfo(true); });
+
+    /* Закрываем крестиком и кликом по затемнению */
+    infoModal.addEventListener('click', function (event) {
+      if (event.target.closest('[data-info-close]')) { toggleInfo(false); }
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !infoModal.classList.contains('is-hidden')) { toggleInfo(false); }
+    });
+  }
+
   syncIndicators();
 })();

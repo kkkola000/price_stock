@@ -43,11 +43,15 @@ $isFiltered = CatalogRequest::isFiltered($filters);
   <div class="topbar__inner">
     <a class="topbar__logo" href="index.php"><?= e($siteName) ?></a>
     <div class="topbar__count" id="js-total"><?= e(Catalog::foundLabel($result['total'])) ?></div>
-    <a class="orders-link" href="orders.php" id="js-orders-link">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h15l-1.5 9h-12L6 6Zm0 0L5 3H2m6 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm10 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Заказы</span>
-      <span class="orders-link__count is-hidden" id="js-orders-count">0</span>
-    </a>
+    <div class="topbar__actions">
+      <button type="button" class="help-btn" id="js-info-open"
+              title="Поставщики и даты обновления" aria-label="Поставщики и даты обновления">?</button>
+      <a class="orders-link" href="orders.php" id="js-orders-link">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h15l-1.5 9h-12L6 6Zm0 0L5 3H2m6 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm10 0a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Заказы</span>
+        <span class="orders-link__count is-hidden" id="js-orders-count">0</span>
+      </a>
+    </div>
   </div>
 
   <form class="searchbar" id="js-filter-form" method="get" action="index.php" role="search">
@@ -139,6 +143,49 @@ $isFiltered = CatalogRequest::isFiltered($filters);
 </div>
 
 <div class="backdrop" id="js-backdrop" hidden></div>
+
+<?php
+// Самая свежая дата среди поставщиков — ею подписываем каталог целиком
+$lastUpdate = null;
+foreach ($suppliers as $supplier) {
+    if (!empty($supplier['last_success_at']) && ($lastUpdate === null || $supplier['last_success_at'] > $lastUpdate)) {
+        $lastUpdate = $supplier['last_success_at'];
+    }
+}
+?>
+<div class="modal is-hidden" id="js-info">
+  <div class="modal__backdrop" data-info-close></div>
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="js-info-title">
+    <div class="modal__head">
+      <h2 id="js-info-title">Поставщики</h2>
+      <button type="button" class="modal__close" data-info-close aria-label="Закрыть">×</button>
+    </div>
+
+    <div class="modal__body">
+      <?php if ($suppliers === []): ?>
+        <p class="modal__empty">Пока нет загруженных прайсов.</p>
+      <?php else: ?>
+        <?php foreach ($suppliers as $supplier): ?>
+          <div class="supplier-row">
+            <div class="supplier-row__main">
+              <div class="supplier-row__name"><?= e($supplier['name']) ?></div>
+              <?php if (!empty($supplier['last_success_at'])): ?>
+                <div class="supplier-row__date">файл обновлён <?= e(format_datetime($supplier['last_success_at'])) ?></div>
+              <?php else: ?>
+                <div class="supplier-row__date supplier-row__date--never">файл ещё не загружался</div>
+              <?php endif; ?>
+            </div>
+            <div class="supplier-row__count"><?= e(Catalog::foundLabel((int) $supplier['products_count'])) ?></div>
+          </div>
+        <?php endforeach; ?>
+      <?php endif; ?>
+    </div>
+
+    <?php if ($lastUpdate !== null): ?>
+      <div class="modal__foot">Каталог обновлён: <?= e(format_datetime($lastUpdate)) ?></div>
+    <?php endif; ?>
+  </div>
+</div>
 
 <footer class="footer">
   <span>Товаров в каталоге: <?= e(number_format(ProductRepository::totalCount(), 0, ',', ' ')) ?></span>

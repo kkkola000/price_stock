@@ -69,15 +69,19 @@ final class SourceRepository
         return array_map([self::class, 'hydrate'], Db::all($sql, $params));
     }
 
-    /** Поставщики, у которых есть хотя бы один товар — для фильтра на витрине. */
+    /**
+     * Поставщики, у которых есть хотя бы один товар — для фильтра на витрине
+     * и окна «Поставщики». Дата берётся от последнего успешного импорта:
+     * именно эти данные сейчас и показаны в каталоге.
+     */
     public static function listForCatalog(): array
     {
         return Db::all(
-            'SELECT s.id, s.name, COUNT(p.id) AS products_count
+            'SELECT s.id, s.name, s.last_success_at, COUNT(p.id) AS products_count
                FROM sources s
                JOIN products p ON p.source_id = s.id
               WHERE s.is_active = 1
-              GROUP BY s.id, s.name
+              GROUP BY s.id, s.name, s.last_success_at
               HAVING products_count > 0
               ORDER BY s.name'
         );
