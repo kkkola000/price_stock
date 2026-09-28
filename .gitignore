@@ -10,3 +10,4 @@ storage/logs/*
 *.log
 storage/backups/*
 storage/scheduler.json
+storage/reset.allow
