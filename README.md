@@ -112,6 +112,15 @@ ADMIN_USER=admin ADMIN_PASS='пароль_админа' SITE_NAME='Катало�
 php bin/setup.php --check       # диагностика: PHP, расширения, права, база, таблицы
 php bin/setup.php --write-config  # создать config.php из переменных окружения
 php bin/setup.php               # применить схему и создать администратора
+php bin/setup.php --list-admins # показать логины администраторов
+```
+
+**Забыли пароль от админки.** Узнать его нельзя — в базе хранится только хеш.
+Зато можно задать новый:
+
+```bash
+php bin/setup.php --list-admins                      # посмотреть, какие есть логины
+ADMIN_USER=admin ADMIN_PASS='новый_пароль' php bin/setup.php --reset-password
 ```
 
 Пароли передавайте через переменные окружения, а не аргументами командной строки:

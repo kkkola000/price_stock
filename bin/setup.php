@@ -7,6 +7,9 @@ declare(strict_types=1);
  *   php bin/setup.php --check                     проверить окружение
  *   php bin/setup.php --write-config              создать config.php из переменных окружения
  *   php bin/setup.php                             создать таблицы и администратора
+ *   php bin/setup.php --list-admins               показать логины администраторов
+ *   ADMIN_USER=admin ADMIN_PASS=новый php bin/setup.php --reset-password
+ *                                                 задать новый пароль администратору
  *
  * Пароли передаются через переменные окружения (DB_PASS, ADMIN_PASS), а не аргументами:
  * аргументы видны в списке процессов другим пользователям сервера.
@@ -21,7 +24,8 @@ const REQUIRED_EXTENSIONS = ['pdo_mysql', 'mbstring', 'zip', 'xmlreader', 'curl'
 const MIN_PHP_VERSION = '8.1.0';
 
 $root = dirname(__DIR__);
-$options = getopt('', ['check', 'write-config', 'force', 'admin-user::', 'admin-pass::', 'quiet']);
+$options = getopt('', ['check', 'write-config', 'force', 'admin-user::', 'admin-pass::',
+    'reset-password', 'list-admins', 'quiet']);
 $quiet = isset($options['quiet']);
 
 function say(string $message): void
@@ -186,6 +190,52 @@ try {
     fail('нет соединения с базой данных: ' . $exception->getMessage());
 }
 say('Соединение с базой данных: ок');
+
+$adminUser = trim((string) ($options['admin-user'] ?? env('ADMIN_USER')));
+$adminPass = env('ADMIN_PASS') !== '' ? env('ADMIN_PASS') : (string) ($options['admin-pass'] ?? '');
+
+/* ---------- Список администраторов ---------- */
+
+if (isset($options['list-admins'])) {
+    $admins = Db::all('SELECT username, created_at, last_login_at FROM admin_users ORDER BY username');
+    if ($admins === []) {
+        say('Администраторов нет. Создать: ADMIN_USER=admin ADMIN_PASS=пароль php bin/setup.php');
+        exit(0);
+    }
+    say('Администраторы:');
+    foreach ($admins as $admin) {
+        say(sprintf('  %-20s создан %s, последний вход %s',
+            $admin['username'],
+            format_datetime($admin['created_at']),
+            format_datetime($admin['last_login_at'])));
+    }
+    exit(0);
+}
+
+/* ---------- Смена пароля ---------- */
+
+if (isset($options['reset-password'])) {
+    // Пароль восстановить нельзя: в базе лежит только хеш. Зато можно задать новый.
+    if ($adminUser === '' || $adminPass === '') {
+        fail('укажите логин и новый пароль: ADMIN_USER=admin ADMIN_PASS=новый_пароль php bin/setup.php --reset-password');
+    }
+    if (mb_strlen($adminPass) < 8) {
+        fail('пароль должен быть не короче 8 символов');
+    }
+    if (Db::first('SELECT id FROM admin_users WHERE username = ?', [$adminUser]) === null) {
+        $known = array_column(Db::all('SELECT username FROM admin_users'), 'username');
+        fail('нет администратора с логином «' . $adminUser . '».'
+            . ($known !== [] ? ' Есть такие: ' . implode(', ', $known) . '.' : ' Администраторов нет вообще.'));
+    }
+
+    Db::run('UPDATE admin_users SET password_hash = ? WHERE username = ?', [
+        password_hash($adminPass, PASSWORD_DEFAULT),
+        $adminUser,
+    ]);
+    say('Пароль администратора «' . $adminUser . '» изменён.');
+    exit(0);
+}
+
 
 try {
     $result = App\Support\Migrator::migrate();
