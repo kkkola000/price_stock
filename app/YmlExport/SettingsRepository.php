@@ -63,7 +63,8 @@ final class SettingsRepository
         array $outlets,
         bool $onlyConfirmed,
         bool $skipZeroStock,
-        bool $oldpriceOnlyHigher
+        bool $oldpriceOnlyHigher,
+        int $stockFallback = 0
     ): void {
         self::get(); // гарантирует существование строки
 
@@ -71,7 +72,8 @@ final class SettingsRepository
             'UPDATE yx_feed_settings SET
                 shop_name = ?, shop_company = ?, shop_url = ?, currency = ?,
                 offer_mapping = ?, outlets = ?,
-                only_confirmed = ?, skip_zero_stock = ?, oldprice_only_higher = ?
+                only_confirmed = ?, skip_zero_stock = ?, oldprice_only_higher = ?,
+                stock_fallback = ?
              WHERE id = 1',
             [
                 mb_substr($shopName, 0, 190),
@@ -83,6 +85,7 @@ final class SettingsRepository
                 $onlyConfirmed ? 1 : 0,
                 $skipZeroStock ? 1 : 0,
                 $oldpriceOnlyHigher ? 1 : 0,
+                max(0, $stockFallback),
             ]
         );
     }

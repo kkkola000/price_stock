@@ -26,30 +26,52 @@ final class WarehouseRepository
         return Db::first('SELECT * FROM yx_warehouses WHERE id = ?', [$id]);
     }
 
-    public static function create(string $name, string $code, int $sort): int
+    public static function create(string $name, string $code, int $sort, string $kind = 'file', int $defaultStock = 0): int
     {
-        Db::run('INSERT INTO yx_warehouses (name, code, sort) VALUES (?, ?, ?)', [
+        Db::run('INSERT INTO yx_warehouses (name, code, sort, kind, default_stock) VALUES (?, ?, ?, ?, ?)', [
             mb_substr($name, 0, 190),
             mb_substr($code, 0, 64),
             $sort,
+            self::kind($kind),
+            max(0, $defaultStock),
         ]);
 
         return Db::lastInsertId();
     }
 
-    public static function update(int $id, string $name, string $code, int $sort): void
+    public static function update(int $id, string $name, string $code, int $sort, string $kind = 'file', int $defaultStock = 0): void
     {
-        Db::run('UPDATE yx_warehouses SET name = ?, code = ?, sort = ? WHERE id = ?', [
+        Db::run('UPDATE yx_warehouses SET name = ?, code = ?, sort = ?, kind = ?, default_stock = ? WHERE id = ?', [
             mb_substr($name, 0, 190),
             mb_substr($code, 0, 64),
             $sort,
+            self::kind($kind),
+            max(0, $defaultStock),
             $id,
         ]);
+    }
+
+    private static function kind(string $kind): string
+    {
+        return $kind === 'virtual' ? 'virtual' : 'file';
     }
 
     public static function setActive(int $id, bool $active): void
     {
         Db::run('UPDATE yx_warehouses SET is_active = ? WHERE id = ?', [$active ? 1 : 0, $id]);
+    }
+
+    /**
+     * Виртуальные склады без файла: попадают в outlets каждого оффера
+     * с постоянным остатком default_stock.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function virtualList(): array
+    {
+        return Db::all(
+            "SELECT * FROM yx_warehouses WHERE kind = 'virtual' AND is_active = 1 ORDER BY sort, id"
+        );
     }
 
     /** Удаляет склад; его загрузка и позиции уходят каскадом. */
