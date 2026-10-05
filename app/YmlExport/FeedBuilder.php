@@ -28,6 +28,9 @@ final class FeedBuilder
         $mapping = $settings['offer_mapping_array'];
         $outlets = $settings['outlets_array'];
         $onlyConfirmed = (int) $settings['only_confirmed'] === 1;
+        $stockMap = StockMapRepository::map();
+        $stockFallback = (int) ($settings['stock_fallback'] ?? 0);
+        $virtualWarehouses = WarehouseRepository::virtualList();
 
         $statuses = $onlyConfirmed ? "('confirmed')" : "('confirmed','suggested')";
 
@@ -90,7 +93,7 @@ final class FeedBuilder
         $offers = 0;
         $productCache = [];
         foreach ($groups as $group) {
-            $offer = self::buildOffer($xml, $group, $mapping, $outlets, $settings, $productCache);
+            $offer = self::buildOffer($xml, $group, $mapping, $outlets, $settings, $productCache, $stockMap, $stockFallback, $virtualWarehouses);
             if ($offer) {
                 $offers++;
             }
@@ -128,6 +131,8 @@ final class FeedBuilder
      * @param array<string,mixed> $outlets
      * @param array<string,mixed> $settings
      * @param array<int,array<string,mixed>|null> $productCache
+     * @param list<array{pattern:string,qty:int}> $stockMap
+     * @param list<array<string,mixed>> $virtualWarehouses
      */
     private static function buildOffer(
         XMLWriter $xml,
@@ -135,7 +140,10 @@ final class FeedBuilder
         array $mapping,
         array $outlets,
         array $settings,
-        array &$productCache
+        array &$productCache,
+        array $stockMap,
+        int $stockFallback,
+        array $virtualWarehouses
     ): bool {
         // Позиции склада могли быть удалены после сопоставления — такие строки пропускаем.
         $group = array_values(array_filter($group, static fn (array $row): bool => $row['item_sku_live'] !== null));
@@ -146,10 +154,20 @@ final class FeedBuilder
         // Приоритетный склад (меньше sort) — оттуда берутся значения тегов оффера.
         $primary = $group[0];
 
+        // Остаток каждой строки: число из файла как есть, текст («Более 5») —
+        // через соответствия администратора, иначе fallback из настроек.
         $totalStock = 0;
-        foreach ($group as $row) {
-            $totalStock += max(0, (int) ($row['stock_qty'] ?? 0));
+        foreach ($group as $idx => $row) {
+            $group[$idx]['resolved_qty'] = StockMapRepository::resolve(
+                $row['stock_qty'] !== null ? (int) $row['stock_qty'] : null,
+                $row['stock_text'] !== null ? (string) $row['stock_text'] : null,
+                $stockMap,
+                $stockFallback
+            );
+            $totalStock += max(0, (int) $group[$idx]['resolved_qty']);
         }
+        // Виртуальные склады в суммарный остаток не входят:
+        // фильтр «исключать нулевые» смотрит только на реальные склады.
         if ((int) $settings['skip_zero_stock'] === 1 && $totalStock === 0) {
             return false;
         }
@@ -196,8 +214,15 @@ final class FeedBuilder
             $xml->startElement((string) ($outlets['parent'] ?? 'outlets'));
             foreach ($group as $row) {
                 $xml->startElement((string) ($outlets['tag'] ?? 'outlet'));
-                $xml->writeAttribute((string) ($outlets['stock_attr'] ?? 'instock'), (string) max(0, (int) ($row['stock_qty'] ?? 0)));
+                $xml->writeAttribute((string) ($outlets['stock_attr'] ?? 'instock'), (string) max(0, (int) ($row['resolved_qty'] ?? 0)));
                 $xml->writeAttribute((string) ($outlets['name_attr'] ?? 'warehouse_name'), (string) $row['warehouse_name']);
+                $xml->endElement();
+            }
+            // Виртуальные склады — у каждого оффера с постоянным остатком.
+            foreach ($virtualWarehouses as $vw) {
+                $xml->startElement((string) ($outlets['tag'] ?? 'outlet'));
+                $xml->writeAttribute((string) ($outlets['stock_attr'] ?? 'instock'), (string) max(0, (int) ($vw['default_stock'] ?? 0)));
+                $xml->writeAttribute((string) ($outlets['name_attr'] ?? 'warehouse_name'), (string) $vw['name']);
                 $xml->endElement();
             }
             $xml->endElement(); // outlets
