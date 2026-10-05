@@ -12,6 +12,7 @@ use App\YmlExport\FeedBuilder;
 use App\YmlExport\Matcher;
 use App\YmlExport\Schema;
 use App\YmlExport\SettingsRepository;
+use App\YmlExport\StockMapRepository;
 use App\YmlExport\UploadImporter;
 use App\YmlExport\UploadRepository;
 use App\YmlExport\WarehouseRepository;
@@ -83,12 +84,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $code = trim((string) ($_POST['code'] ?? ''));
             $sort = (int) ($_POST['sort'] ?? 0);
+            $kind = (string) ($_POST['kind'] ?? 'file') === 'virtual' ? 'virtual' : 'file';
+            $defaultStock = max(0, (int) ($_POST['default_stock'] ?? 0));
             if ($id > 0) {
-                WarehouseRepository::update($id, $name, $code, $sort);
+                WarehouseRepository::update($id, $name, $code, $sort, $kind, $defaultStock);
                 flash('success', 'Склад сохранён.');
             } else {
-                WarehouseRepository::create($name, $code, $sort);
-                flash('success', 'Склад создан. Теперь загрузите его файл остатков.');
+                WarehouseRepository::create($name, $code, $sort, $kind, $defaultStock);
+                flash('success', $kind === 'virtual'
+                    ? 'Виртуальный склад создан: его остаток попадёт в каждый оффер фида.'
+                    : 'Склад создан. Теперь загрузите его файл остатков.');
             }
             redirect('yml.php?tab=warehouses');
             break;
@@ -389,16 +394,42 @@ function handleSettingsSave(): void
         $outlets,
         isset($_POST['only_confirmed']),
         isset($_POST['skip_zero_stock']),
-        isset($_POST['oldprice_only_higher'])
+        isset($_POST['oldprice_only_higher']),
+        max(0, (int) ($_POST['stock_fallback'] ?? 0))
     );
+
+    // Соответствие текстовых остатков числам («Более 5» -> 5).
+    // Пустые строки в базу не пишем: pattern там UNIQUE.
+    $stockRows = [];
+    $seenPatterns = [];
+    $stockPatterns = (array) ($_POST['stock_pattern'] ?? []);
+    $stockQtys = (array) ($_POST['stock_qty'] ?? []);
+    $stockDelete = (array) ($_POST['stock_delete'] ?? []);
+    foreach ($stockPatterns as $i => $rawPattern) {
+        if (isset($stockDelete[$i])) {
+            continue;
+        }
+        $pattern = trim((string) $rawPattern);
+        if ($pattern === '') {
+            continue;
+        }
+        $key = mb_strtolower($pattern, 'UTF-8');
+        if (isset($seenPatterns[$key])) {
+            continue; // дубль — оставляем первый
+        }
+        $seenPatterns[$key] = true;
+        $stockRows[] = ['pattern' => $pattern, 'qty' => max(0, (int) ($stockQtys[$i] ?? 0))];
+    }
+    StockMapRepository::replaceAll($stockRows);
+    $addStockRow = isset($_POST['add_stock_row']);
 
     if ($errors === []) {
         rebuildQuiet();
-        flash('success', $addRow !== '' ? 'Строка добавлена.' : 'Настройки фида сохранены.');
+        flash('success', $addRow !== '' || $addStockRow ? 'Строка добавлена.' : 'Настройки фида сохранены.');
     } else {
         flash('error', 'Настройки сохранены частично — исправьте отмеченные строки.');
     }
-    redirect('yml.php?tab=settings');
+    redirect('yml.php?tab=settings' . ($addStockRow ? '&add_stock=1' : ''));
 }
 
 /* ---------- Данные для страниц ---------- */
@@ -408,6 +439,10 @@ $warehouses = WarehouseRepository::list();
 $uploads = UploadRepository::list();
 $matchStats = Matcher::stats();
 $settings = SettingsRepository::get();
+$stockMapRows = StockMapRepository::list();
+if ($tab === 'settings' && isset($_GET['add_stock'])) {
+    $stockMapRows[] = ['pattern' => '', 'qty' => 0]; // пустая строка по кнопке «+ Добавить соответствие»
+}
 
 $queue = $tab === 'matches' ? Matcher::queue() : [];
 $manualMatch = null;
@@ -537,11 +572,17 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         <tr><td colspan="6" class="muted">Складов пока нет — создайте первый.</td></tr>
       <?php endif; ?>
       <?php foreach ($warehouses as $wh): ?>
+        <?php $isVirtual = (string) ($wh['kind'] ?? 'file') === 'virtual'; ?>
         <tr>
-          <td><b><?= e((string) $wh['name']) ?></b></td>
+          <td>
+            <b><?= e((string) $wh['name']) ?></b>
+            <?php if ($isVirtual): ?>
+              <span class="pill pill--running">виртуальный · <?= (int) ($wh['default_stock'] ?? 0) ?></span>
+            <?php endif; ?>
+          </td>
           <td class="mono small"><?= e((string) $wh['code']) ?></td>
-          <td class="num"><?= (int) $wh['items_count'] ?></td>
-          <td class="num"><?= (int) $wh['confirmed_count'] ?></td>
+          <td class="num"><?= $isVirtual ? '—' : (int) $wh['items_count'] ?></td>
+          <td class="num"><?= $isVirtual ? '—' : (int) $wh['confirmed_count'] ?></td>
           <td>
             <?php if ((int) $wh['is_active'] === 1): ?>
               <span class="pill pill--ok">активен</span>
@@ -551,7 +592,9 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
           </td>
           <td class="row-actions">
             <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&wh_form=<?= (int) $wh['id'] ?>">Изменить</a>
-            <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&upload_form=<?= (int) $wh['id'] ?>">Файл и маппинг</a>
+            <?php if (!$isVirtual): ?>
+              <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&upload_form=<?= (int) $wh['id'] ?>">Файл и маппинг</a>
+            <?php endif; ?>
             <form method="post" class="inline">
               <?= Csrf::field() ?>
               <input type="hidden" name="action" value="warehouse-toggle">
@@ -591,6 +634,19 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
           <label class="field"><span class="field__label">Приоритет (sort)</span>
             <input class="input" name="sort" type="number" value="<?= (int) ($whEdit['sort'] ?? 0) ?>">
             <span class="field__hint">Меньше = приоритетнее: цены оффера берутся с этого склада.</span>
+          </label>
+        </div>
+        <div class="grid-3">
+          <label class="field"><span class="field__label">Тип склада</span>
+            <select class="input" name="kind">
+              <option value="file"<?= sel('file', (string) ($whEdit['kind'] ?? 'file')) ?>>Из файла — остатки из прайса</option>
+              <option value="virtual"<?= sel('virtual', (string) ($whEdit['kind'] ?? 'file')) ?>>Виртуальный — без файла</option>
+            </select>
+            <span class="field__hint">Виртуальный склад добавляется в outlets каждого оффера с постоянным остатком.</span>
+          </label>
+          <label class="field"><span class="field__label">Остаток виртуального склада</span>
+            <input class="input" name="default_stock" type="number" min="0" value="<?= (int) ($whEdit['default_stock'] ?? 0) ?>">
+            <span class="field__hint">Это число уйдёт в instock у всех офферов. В суммарный остаток для фильтра «исключать нулевые» не входит.</span>
           </label>
         </div>
         <div class="form__actions">
@@ -942,10 +998,45 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       </div>
     </div>
 
+    <div class="card table-wrap">
+      <h2 class="card__title" style="padding:18px 18px 0">Соответствие остатков</h2>
+      <p class="card__hint" style="padding:0 18px">
+        Если поставщик передаёт остаток текстом («Более 5», «мало», «в наличии»), здесь задаётся,
+        какое число уйдёт в фид в атрибут instock. Совпадение — сначала точное, затем по вхождению,
+        регистр не важен. Числа из файла передаются как есть, без соответствий.
+      </p>
+      <table class="table table--compact">
+        <thead>
+          <tr><th>Значение из файла</th><th style="width:170px">Передавать количество</th><th style="width:90px"></th></tr>
+        </thead>
+        <tbody>
+        <?php if ($stockMapRows === []): ?>
+          <tr><td colspan="3" class="muted">Соответствий пока нет — добавьте первое.</td></tr>
+        <?php endif; ?>
+        <?php foreach ($stockMapRows as $i => $stockRow): ?>
+          <tr>
+            <td><input class="input" name="stock_pattern[<?= $i ?>]" maxlength="190" value="<?= e((string) $stockRow['pattern']) ?>" placeholder="Более 5"></td>
+            <td><input class="input" type="number" min="0" name="stock_qty[<?= $i ?>]" value="<?= (int) $stockRow['qty'] ?>"></td>
+            <td><label class="check-inline" style="margin:0"><input type="checkbox" name="stock_delete[<?= $i ?>]"> <span class="muted small">удалить</span></label></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <div class="grid-3" style="padding:0 18px">
+        <label class="field"><span class="field__label">Если соответствие не найдено — передавать</span>
+          <input class="input" type="number" min="0" name="stock_fallback" value="<?= (int) ($settings['stock_fallback'] ?? 0) ?>">
+          <span class="field__hint">Например 0: неизвестный текстовый остаток уйдёт в фид нулём.</span>
+        </label>
+      </div>
+      <div class="form__actions" style="padding:0 18px 18px">
+        <button class="btn btn--ghost" name="add_stock_row" value="1">+ Добавить соответствие</button>
+      </div>
+    </div>
+
     <div class="card">
       <h2 class="card__title">Прочее</h2>
       <label class="check-inline"><input type="checkbox" name="only_confirmed"<?= chk((int) $settings['only_confirmed'] === 1) ?>> Включать в фид только подтверждённые сопоставления</label>
-      <label class="check-inline"><input type="checkbox" name="skip_zero_stock"<?= chk((int) $settings['skip_zero_stock'] === 1) ?>> Исключать офферы с нулевым суммарным остатком</label>
+      <label class="check-inline"><input type="checkbox" name="skip_zero_stock"<?= chk((int) $settings['skip_zero_stock'] === 1) ?>> Исключать офферы с нулевым суммарным остатком <span class="muted small">(виртуальные склады в сумме не учитываются)</span></label>
       <label class="check-inline"><input type="checkbox" name="oldprice_only_higher"<?= chk((int) $settings['oldprice_only_higher'] === 1) ?>> oldprice выводить, только если больше price</label>
       <div class="form__actions">
         <button class="btn btn--primary">Сохранить настройки</button>
