@@ -40,7 +40,7 @@ final class FeedBuilder
                     i.name AS item_name, i.sku AS item_sku_live, i.stock_qty, i.stock_text,
                     i.price, i.oldprice, i.min_price, i.extra
              FROM yx_matches m
-             JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1
+             JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1 AND w.in_feed = 1
              LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
              WHERE m.status IN {$statuses}
              ORDER BY m.product_id, w.sort, w.id"

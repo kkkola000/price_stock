@@ -159,6 +159,38 @@ final class Matcher
         );
     }
 
+    /** Полное удаление сопоставления: пара разрывается, позиция возвращается в очередь. */
+    public static function unmatch(int $matchId): void
+    {
+        Db::run(
+            "UPDATE yx_matches SET
+                status = 'unmatched', product_id = NULL, product_sku = '',
+                score = 0, method = 'none', confirmed_by = NULL, confirmed_at = NULL
+             WHERE id = ?",
+            [$matchId]
+        );
+    }
+
+    /**
+     * Подтверждённые пары для подраздела «Товары».
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function confirmedList(int $limit = 500): array
+    {
+        return Db::all(
+            "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
+                    w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
+             FROM yx_matches m
+             LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
+             LEFT JOIN yx_warehouses w ON w.id = m.warehouse_id
+             LEFT JOIN products p ON p.id = m.product_id
+             WHERE m.status = 'confirmed'
+             ORDER BY w.sort, w.id, m.id
+             LIMIT " . max(1, $limit)
+        );
+    }
+
     /**
      * Очередь сопоставления для вкладки: предложенные и не найденные.
      *

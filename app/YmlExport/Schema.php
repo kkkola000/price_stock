@@ -18,16 +18,25 @@ use RuntimeException;
  */
 final class Schema
 {
-    /** Версия миграции => контрольная таблица. */
+    /**
+     * Версия миграции => контроль: таблица целиком или конкретный столбец
+     * (для миграций, которые только добавляют столбец в существующую таблицу).
+     *
+     * @var array<string, array{table:string, column:?string}>
+     */
     private const MIGRATIONS = [
-        '2026_10_05_01_yml_export'    => 'yx_warehouses',
-        '2026_10_05_02_yml_stock_map' => 'yx_stock_map',
+        '2026_10_05_01_yml_export'          => ['table' => 'yx_warehouses', 'column' => null],
+        '2026_10_05_02_yml_stock_map'       => ['table' => 'yx_stock_map', 'column' => null],
+        '2026_10_05_03_yml_feed_warehouses' => ['table' => 'yx_warehouses', 'column' => 'in_feed'],
     ];
 
     public static function ensure(): void
     {
-        foreach (self::MIGRATIONS as $version => $table) {
-            if (Db::tableExists($table)) {
+        foreach (self::MIGRATIONS as $version => $check) {
+            $applied = $check['column'] === null
+                ? Db::tableExists($check['table'])
+                : self::columnExists($check['table'], $check['column']);
+            if ($applied) {
                 continue;
             }
 
@@ -46,5 +55,14 @@ final class Schema
                 Db::run('INSERT IGNORE INTO schema_migrations (version) VALUES (?)', [$version]);
             }
         }
+    }
+
+    private static function columnExists(string $table, string $column): bool
+    {
+        return Db::first(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            [$table, $column]
+        ) !== null;
     }
 }

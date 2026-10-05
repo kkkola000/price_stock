@@ -61,6 +61,12 @@ final class WarehouseRepository
         Db::run('UPDATE yx_warehouses SET is_active = ? WHERE id = ?', [$active ? 1 : 0, $id]);
     }
 
+    /** Галочка «склад в фиде» со вкладки «Готовый фид». */
+    public static function setInFeed(int $id, bool $inFeed): void
+    {
+        Db::run('UPDATE yx_warehouses SET in_feed = ? WHERE id = ?', [$inFeed ? 1 : 0, $id]);
+    }
+
     /**
      * Виртуальные склады без файла: попадают в outlets каждого оффера
      * с постоянным остатком default_stock.
@@ -70,7 +76,7 @@ final class WarehouseRepository
     public static function virtualList(): array
     {
         return Db::all(
-            "SELECT * FROM yx_warehouses WHERE kind = 'virtual' AND is_active = 1 ORDER BY sort, id"
+            "SELECT * FROM yx_warehouses WHERE kind = 'virtual' AND is_active = 1 AND in_feed = 1 ORDER BY sort, id"
         );
     }
 
