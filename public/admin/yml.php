@@ -9,6 +9,7 @@ use App\Support\Auth;
 use App\Support\Csrf;
 use App\Support\Db;
 use App\YmlExport\FeedBuilder;
+use App\YmlExport\FeedRepository;
 use App\YmlExport\Matcher;
 use App\YmlExport\Schema;
 use App\YmlExport\SettingsRepository;
@@ -54,15 +55,16 @@ try {
 Auth::requireLogin();
 Csrf::check();
 Schema::ensure();
+FeedRepository::ensureDefault();
 
 $adminId = (int) ($_SESSION['admin_id'] ?? 0);
 $tab = (string) ($_GET['tab'] ?? 'warehouses');
 
-/** Пересборка фида без падения страницы: ошибка уйдёт в лог и flash. */
+/** Пересборка фидов без падения страницы: ошибка уйдёт в лог и flash. */
 function rebuildQuiet(): void
 {
     try {
-        FeedBuilder::build();
+        FeedBuilder::buildAll();
     } catch (Throwable $exception) {
         error_log('[admin-yml] сборка фида: ' . $exception->getMessage());
         flash('error', 'Фид не пересобрался: ' . $exception->getMessage());
@@ -178,13 +180,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('yml.php?tab=matches&sub=items');
             break;
 
-        case 'warehouses-feed-save':
-            $checkedIds = array_map('intval', (array) ($_POST['in_feed'] ?? []));
-            foreach (WarehouseRepository::list() as $wh) {
-                WarehouseRepository::setInFeed((int) $wh['id'], in_array((int) $wh['id'], $checkedIds, true));
+        case 'feed-save':
+            $feedId = (int) ($_POST['id'] ?? 0);
+            $feedName = trim((string) ($_POST['name'] ?? ''));
+            if ($feedName === '') {
+                flash('error', 'Укажите название ссылки.');
+                redirect('yml.php?tab=feed&feed_form=' . ($feedId > 0 ? $feedId : 'new'));
             }
-            flash('success', 'Состав складов в фиде сохранён.');
+            $feedWarehouseIds = array_map('intval', (array) ($_POST['warehouse_ids'] ?? []));
+            if ($feedId > 0 && FeedRepository::find($feedId) !== null) {
+                FeedRepository::update($feedId, $feedName, $feedWarehouseIds);
+                flash('success', 'Ссылка «' . $feedName . '» сохранена.');
+            } else {
+                FeedRepository::create($feedName, $feedWarehouseIds);
+                flash('success', 'Ссылка «' . $feedName . '» создана — фид по ней уже доступен.');
+            }
             rebuildQuiet();
+            redirect('yml.php?tab=feed');
+            break;
+
+        case 'feed-token':
+            $feedId = (int) ($_POST['id'] ?? 0);
+            if (FeedRepository::find($feedId) !== null) {
+                FeedRepository::regenerateToken($feedId);
+                rebuildQuiet();
+                flash('success', 'Токен перевыпущен. Старая ссылка на этот фид больше не работает.');
+            }
+            redirect('yml.php?tab=feed');
+            break;
+
+        case 'feed-delete':
+            FeedRepository::delete((int) ($_POST['id'] ?? 0));
+            flash('success', 'Ссылка удалена.');
             redirect('yml.php?tab=feed');
             break;
 
@@ -192,15 +219,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             handleSettingsSave();
             break;
 
-        case 'token-regenerate':
-            SettingsRepository::regenerateToken();
-            flash('success', 'Токен перевыпущен. Старая ссылка на фид больше не работает.');
-            redirect('yml.php?tab=feed');
-            break;
-
         case 'feed-build':
             rebuildQuiet();
-            flash('success', 'Фид пересобран.');
+            flash('success', 'Все фиды пересобраны.');
             redirect('yml.php?tab=feed');
             break;
     }
@@ -500,11 +521,35 @@ $warehouseFormId = isset($_GET['wh_form']) ? (int) $_GET['wh_form'] : null; // 0
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
 $base = rtrim(dirname(dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '/admin/yml.php'))), '/');
-$feedUrl = $scheme . '://' . $host . $base . '/feed/yml.php?token=' . $settings['token'];
+$feedBaseUrl = $scheme . '://' . $host . $base . '/feed/yml.php?token=';
 
+$feeds = FeedRepository::list();
+
+// Форма ссылки: ?feed_form=new — новая, ?feed_form=<id> — редактирование.
+$feedFormId = null;
+if (isset($_GET['feed_form'])) {
+    $feedFormId = (string) $_GET['feed_form'] === 'new' ? 0 : (int) $_GET['feed_form'];
+}
+$feedEdit = null;
+if ($feedFormId !== null && $feedFormId > 0) {
+    $feedEdit = FeedRepository::find($feedFormId);
+    if ($feedEdit === null) {
+        $feedFormId = null;
+    }
+}
+
+// Предпросмотр: выбранная ссылка (?preview_feed=<id>) или первая в списке.
+$previewFeedId = isset($_GET['preview_feed']) ? (int) $_GET['preview_feed'] : (int) ($feeds[0]['id'] ?? 0);
+$previewFeed = null;
+foreach ($feeds as $feedRow) {
+    if ((int) $feedRow['id'] === $previewFeedId) {
+        $previewFeed = $feedRow;
+        break;
+    }
+}
 $feedPreview = '';
-$feedFile = FeedBuilder::path((string) $settings['token']);
-if (is_file($feedFile)) {
+$feedFile = $previewFeed !== null ? FeedBuilder::path((string) $previewFeed['token']) : null;
+if ($feedFile !== null && is_file($feedFile)) {
     $feedPreview = (string) file_get_contents($feedFile, false, null, 0, 2600);
 }
 
@@ -1026,7 +1071,9 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <p class="card__hint" style="padding:0 18px">
         Каждая строка — тег или атрибут внутри &lt;offer&gt;. Имя можно заменить на своё,
         значение привязать к полю файла склада (price, oldprice, min_price, sku, name, stock),
-        к столбцу по букве (A, B, C…), к товару каталога (sku, name) или к константе.
+        к столбцу по букве (A, B, C…), к товару каталога (sku, name, price, price_text, stock, stock_text)
+        или к константе. По умолчанию: артикул и название — из вашего файла, цена — из каталога;
+        остаток в outlets — из каталога, а если там его нет — из файла склада.
       </p>
       <table class="table table--compact">
         <thead>
@@ -1128,69 +1175,114 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 
 <?php else: ?>
   <!-- ================= Готовый фид ================= -->
-  <?php if ($settings['built_at'] !== null): ?>
-    <div class="alert alert--success">
-      Фид собран <?= e(format_datetime($settings['built_at'])) ?> · офферов: <b><?= (int) $settings['built_offers'] ?></b>
-      <?php if (is_file($feedFile)): ?>· размер: <?= number_format(filesize($feedFile) / 1024, 1, ',', ' ') ?> КБ<?php endif; ?>
-    </div>
-  <?php else: ?>
-    <div class="alert alert--warning">Фид ещё не собирался — нажмите «Пересобрать сейчас».</div>
-  <?php endif; ?>
-
-  <div class="card">
-    <h2 class="card__title">Склады в фиде</h2>
-    <p class="card__hint">Только отмеченные склады попадают в YML: их остатки идут в outlets, цены оффера берутся по приоритету. Отключённые склады в фид не попадут независимо от галочки.</p>
-    <form method="post">
-      <?= Csrf::field() ?>
-      <input type="hidden" name="action" value="warehouses-feed-save">
-      <?php if ($warehouses === []): ?>
-        <p class="muted">Складов пока нет — создайте их на вкладке «Склады и загрузка».</p>
+  <div class="card table-wrap">
+    <h2 class="card__title" style="padding:18px 18px 0">Ссылки на фиды</h2>
+    <p class="card__hint" style="padding:0 18px">
+      Каждая ссылка — отдельный YML со своим набором складов: например, один фид для Маркета,
+      другой — для своего сайта. Отдаётся актуальный XML из кэша; фиды пересобираются
+      после загрузки склада, подтверждения сопоставлений и сохранения настроек.
+    </p>
+    <table class="table">
+      <thead>
+        <tr><th>Название</th><th>Ссылка</th><th class="num">Складов</th><th>Собран</th><th></th></tr>
+      </thead>
+      <tbody>
+      <?php if ($feeds === []): ?>
+        <tr><td colspan="5" class="muted">Ссылок пока нет — создайте первую.</td></tr>
       <?php endif; ?>
-      <?php foreach ($warehouses as $wh): ?>
-        <label class="check-inline" style="display:block">
-          <input type="checkbox" name="in_feed[]" value="<?= (int) $wh['id'] ?>"<?= chk((int) ($wh['in_feed'] ?? 1) === 1) ?>>
-          <b><?= e((string) $wh['name']) ?></b>
-          <?php if ((string) ($wh['kind'] ?? 'file') === 'virtual'): ?>
-            <span class="pill pill--running">виртуальный · <?= (int) ($wh['default_stock'] ?? 0) ?></span>
-          <?php endif; ?>
-          <?php if ((int) $wh['is_active'] !== 1): ?>
-            <span class="pill pill--disabled">отключён</span>
-          <?php endif; ?>
-        </label>
+      <?php foreach ($feeds as $feedRow): ?>
+        <tr>
+          <td><b><?= e((string) $feedRow['name']) ?></b></td>
+          <td><input class="input mono" readonly style="min-width:340px" value="<?= e($feedBaseUrl . $feedRow['token']) ?>" onclick="this.select()"></td>
+          <td class="num"><?= count((array) $feedRow['warehouse_ids']) ?></td>
+          <td class="small">
+            <?php if ($feedRow['built_at'] !== null): ?>
+              <?= e(format_datetime($feedRow['built_at'])) ?> · офферов: <b><?= (int) $feedRow['built_offers'] ?></b>
+            <?php else: ?>
+              <span class="muted">ещё не собирался</span>
+            <?php endif; ?>
+          </td>
+          <td class="row-actions">
+            <a class="btn btn--small btn--ghost" href="yml.php?tab=feed&feed_form=<?= (int) $feedRow['id'] ?>">Изменить</a>
+            <a class="btn btn--small btn--ghost" href="<?= e($feedBaseUrl . $feedRow['token']) ?>" target="_blank" rel="noopener">XML ↗</a>
+            <form method="post" class="inline" onsubmit="return confirm('Старая ссылка на этот фид перестанет работать. Перевыпустить токен?')">
+              <?= Csrf::field() ?>
+              <input type="hidden" name="action" value="feed-token">
+              <input type="hidden" name="id" value="<?= (int) $feedRow['id'] ?>">
+              <button class="btn btn--small btn--ghost">Перевыпустить токен</button>
+            </form>
+            <?php if (count($feeds) > 1): ?>
+              <form method="post" class="inline" onsubmit="return confirm('Удалить эту ссылку? Фид по ней перестанет открываться.')">
+                <?= Csrf::field() ?>
+                <input type="hidden" name="action" value="feed-delete">
+                <input type="hidden" name="id" value="<?= (int) $feedRow['id'] ?>">
+                <button class="btn btn--small btn--danger">Удалить</button>
+              </form>
+            <?php endif; ?>
+          </td>
+        </tr>
       <?php endforeach; ?>
-      <?php if ($warehouses !== []): ?>
-        <div class="form__actions">
-          <button class="btn btn--primary">Сохранить</button>
-        </div>
-      <?php endif; ?>
-    </form>
-  </div>
-
-  <div class="card">
-    <h2 class="card__title">Ссылка на фид</h2>
-    <p class="card__hint">Отдаёт актуальный XML из кэша; пересобирается после загрузки склада, подтверждения сопоставлений и сохранения настроек.</p>
-    <label class="field">
-      <input class="input mono" readonly value="<?= e($feedUrl) ?>" onclick="this.select()">
-      <span class="field__hint">Токен можно перевыпустить — старая ссылка перестанет работать.</span>
-    </label>
-    <div class="form__actions">
+      </tbody>
+    </table>
+    <div class="form__actions" style="padding:0 18px 18px">
+      <a class="btn btn--ghost" href="yml.php?tab=feed&feed_form=new">+ Новая ссылка</a>
       <form method="post" class="inline">
         <?= Csrf::field() ?>
         <input type="hidden" name="action" value="feed-build">
-        <button class="btn btn--primary">Пересобрать сейчас</button>
-      </form>
-      <form method="post" class="inline" onsubmit="return confirm('Старая ссылка перестанет работать. Перевыпустить токен?')">
-        <?= Csrf::field() ?>
-        <input type="hidden" name="action" value="token-regenerate">
-        <button class="btn btn--ghost">Перевыпустить токен</button>
+        <button class="btn btn--primary">Пересобрать все сейчас</button>
       </form>
     </div>
   </div>
 
-  <?php if ($feedPreview !== ''): ?>
+  <?php if ($feedFormId !== null):
+      $formWarehouseIds = $feedEdit !== null ? array_map('intval', (array) $feedEdit['warehouse_ids']) : []; ?>
     <div class="card">
-      <h2 class="card__title">Предпросмотр (начало файла)</h2>
-      <pre class="feed-preview"><?= e($feedPreview) ?></pre>
+      <h2 class="card__title"><?= $feedFormId > 0 ? 'Ссылка: ' . e((string) ($feedEdit['name'] ?? '')) : 'Новая ссылка' ?></h2>
+      <p class="card__hint">Отмеченные склады попадут в этот YML: их остатки идут в outlets, значения тегов оффера берутся по приоритету складов. Отключённые склады не попадут в фид независимо от галочки.</p>
+      <form method="post">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="action" value="feed-save">
+        <input type="hidden" name="id" value="<?= (int) $feedFormId ?>">
+        <label class="field" style="max-width:420px"><span class="field__label">Название ссылки</span>
+          <input class="input" name="name" required maxlength="190" value="<?= e((string) ($feedEdit['name'] ?? '')) ?>" placeholder="Например: Маркет"></label>
+        <?php if ($warehouses === []): ?>
+          <p class="muted">Складов пока нет — создайте их на вкладке «Склады и загрузка».</p>
+        <?php endif; ?>
+        <?php foreach ($warehouses as $wh): ?>
+          <label class="check-inline" style="display:block">
+            <input type="checkbox" name="warehouse_ids[]" value="<?= (int) $wh['id'] ?>"<?= chk(in_array((int) $wh['id'], $formWarehouseIds, true)) ?>>
+            <b><?= e((string) $wh['name']) ?></b>
+            <?php if ((string) ($wh['kind'] ?? 'file') === 'virtual'): ?>
+              <span class="pill pill--running">виртуальный · <?= (int) ($wh['default_stock'] ?? 0) ?></span>
+            <?php endif; ?>
+            <?php if ((int) $wh['is_active'] !== 1): ?>
+              <span class="pill pill--disabled">отключён</span>
+            <?php endif; ?>
+          </label>
+        <?php endforeach; ?>
+        <div class="form__actions">
+          <button class="btn btn--primary"><?= $feedFormId > 0 ? 'Сохранить' : 'Создать ссылку' ?></button>
+          <a class="btn btn--ghost" href="yml.php?tab=feed">Отмена</a>
+        </div>
+      </form>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($previewFeed !== null): ?>
+    <div class="card">
+      <h2 class="card__title">Предпросмотр: <?= e((string) $previewFeed['name']) ?></h2>
+      <?php if (count($feeds) > 1): ?>
+        <p class="card__hint">
+          <?php foreach ($feeds as $feedRow): ?>
+            <a href="yml.php?tab=feed&preview_feed=<?= (int) $feedRow['id'] ?>" style="margin-right:12px;<?= (int) $feedRow['id'] === $previewFeedId ? 'font-weight:700' : '' ?>"><?= e((string) $feedRow['name']) ?></a>
+          <?php endforeach; ?>
+        </p>
+      <?php endif; ?>
+      <?php if ($feedPreview !== ''): ?>
+        <pre class="feed-preview"><?= e($feedPreview) ?></pre>
+      <?php else: ?>
+        <p class="muted">Файл ещё не собран — нажмите «Пересобрать все сейчас».</p>
+      <?php endif; ?>
     </div>
   <?php endif; ?>
 <?php endif; ?>
