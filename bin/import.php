@@ -31,6 +31,23 @@ $log = static function (string $message) use ($quiet): void {
     }
 };
 
+/** Дополнение «Выгрузка YML»: обновить файлы складов по ссылкам и пересобрать все фиды. */
+$updateYml = static function () use ($log): void {
+    try {
+        $stats = \App\YmlExport\AutoUpdater::run();
+        $log(sprintf(
+            'YML-фиды: файлов складов обновлено: %d (ошибок: %d); фидов: %d, офферов: %d.',
+            $stats['uploads'],
+            $stats['failed'],
+            $stats['feeds'],
+            $stats['offers']
+        ));
+    } catch (Throwable $exception) {
+        error_log('[yml-export] автообновление: ' . $exception->getMessage());
+        $log('YML-фиды: ошибка автообновления — ' . $exception->getMessage());
+    }
+};
+
 try {
     $manual = isset($options['source']) || isset($options['all']);
 
@@ -53,6 +70,7 @@ try {
 
     if ($sources === []) {
         $log('Нечего импортировать.');
+        $updateYml();
         exit(0);
     }
 
@@ -70,6 +88,8 @@ try {
             $failed++;
         }
     }
+
+    $updateYml();
 
     exit($failed > 0 ? 2 : 0);
 } catch (Throwable $exception) {

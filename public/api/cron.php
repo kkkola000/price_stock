@@ -30,6 +30,16 @@ if (!hash_equals($configured, $provided)) {
     json_response(['ok' => false, 'error' => 'Неверный токен.'], 403);
 }
 
+/** Дополнение «Выгрузка YML»: обновить файлы складов по ссылкам и пересобрать все фиды. */
+$updateYml = static function (): array {
+    try {
+        return \App\YmlExport\AutoUpdater::run();
+    } catch (Throwable $exception) {
+        error_log('[yml-export] автообновление: ' . $exception->getMessage());
+        return ['error' => $exception->getMessage()];
+    }
+};
+
 try {
     $sources = isset($_GET['all'])
         ? SourceRepository::list(['only_active' => true])
@@ -38,7 +48,7 @@ try {
     Scheduler::ping('url', count($sources));
 
     if ($sources === []) {
-        json_response(['ok' => true, 'message' => 'Нечего импортировать.', 'results' => []]);
+        json_response(['ok' => true, 'message' => 'Нечего импортировать.', 'results' => [], 'yml_feeds' => $updateYml()]);
     }
 
     $results = ImportService::runMany($sources, 'cron');
@@ -57,6 +67,7 @@ try {
             'deleted'  => $r['rows_deleted'],
             'message'  => $r['message'],
         ], $results),
+        'yml_feeds' => $updateYml(),
     ]);
 } catch (Throwable $exception) {
     error_log('[cron] ' . $exception->getMessage());

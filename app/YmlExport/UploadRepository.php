@@ -35,6 +35,24 @@ final class UploadRepository
         );
     }
 
+    /**
+     * Загрузки для автообновления по расписанию вместе с панелью:
+     * файлы, получаемые по ссылке, у активных складов типа «из файла».
+     * Ручные файлы (fetch_method = upload) не трогаем — они не меняются сами.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function listAutoImportable(): array
+    {
+        return Db::all(
+            "SELECT u.*, w.name AS warehouse_name
+             FROM yx_uploads u
+             JOIN yx_warehouses w ON w.id = u.warehouse_id AND w.is_active = 1 AND w.kind <> 'virtual'
+             WHERE u.fetch_method = 'url'
+             ORDER BY w.sort, w.id"
+        );
+    }
+
     /** @return array<string,mixed>|null */
     public static function find(int $id): ?array
     {
