@@ -52,6 +52,33 @@ final class StockMapRepository
     }
 
     /**
+     * Текст остатка → количество по соответствиям администратора
+     * (сначала точное совпадение, затем по вхождению).
+     * Не нашлось — null, решение о fallback остаётся вызывающему.
+     *
+     * @param list<array{pattern:string,qty:int}> $map
+     */
+    public static function match(?string $text, array $map): ?int
+    {
+        $normalized = self::normalize((string) $text);
+        if ($normalized === '') {
+            return null;
+        }
+        foreach ($map as $rule) {
+            if ($rule['pattern'] !== '' && $rule['pattern'] === $normalized) {
+                return max(0, $rule['qty']);
+            }
+        }
+        foreach ($map as $rule) {
+            if ($rule['pattern'] !== '' && mb_strpos($normalized, $rule['pattern']) !== false) {
+                return max(0, $rule['qty']);
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Количество для фида: число из файла важнее текста; текст ищем
      * в соответствиях (сначала точное совпадение, затем по вхождению);
      * если не нашлось — fallback из настроек.
@@ -64,21 +91,9 @@ final class StockMapRepository
             return max(0, $qty);
         }
 
-        $normalized = self::normalize((string) $text);
-        if ($normalized !== '') {
-            foreach ($map as $rule) {
-                if ($rule['pattern'] !== '' && $rule['pattern'] === $normalized) {
-                    return max(0, $rule['qty']);
-                }
-            }
-            foreach ($map as $rule) {
-                if ($rule['pattern'] !== '' && mb_strpos($normalized, $rule['pattern']) !== false) {
-                    return max(0, $rule['qty']);
-                }
-            }
-        }
+        $matched = self::match($text, $map);
 
-        return max(0, $fallback);
+        return $matched ?? max(0, $fallback);
     }
 
     private static function normalize(string $value): string

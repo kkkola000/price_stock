@@ -11,8 +11,20 @@ use App\Support\Db;
  */
 final class SettingsRepository
 {
-    /** Конструктор по умолчанию — соответствует примеру из задания. */
+    /**
+     * Конструктор по умолчанию: артикул и название — из файла склада,
+     * цена — из карточки каталога, oldprice/min_price — из файла.
+     */
     private const DEFAULT_OFFER_MAPPING = [
+        ['enabled' => true, 'kind' => 'attribute', 'name' => 'id',        'source' => ['type' => 'field',   'ref' => 'sku']],
+        ['enabled' => true, 'kind' => 'tag',       'name' => 'name',      'source' => ['type' => 'field',   'ref' => 'name']],
+        ['enabled' => true, 'kind' => 'tag',       'name' => 'price',     'source' => ['type' => 'catalog', 'ref' => 'price']],
+        ['enabled' => true, 'kind' => 'tag',       'name' => 'oldprice',  'source' => ['type' => 'field',   'ref' => 'oldprice']],
+        ['enabled' => true, 'kind' => 'tag',       'name' => 'min_price', 'source' => ['type' => 'field',   'ref' => 'min_price']],
+    ];
+
+    /** Прежний дефолт: если он сохранён нетронутым, заменяем на новый. */
+    private const LEGACY_OFFER_MAPPING = [
         ['enabled' => true, 'kind' => 'attribute', 'name' => 'id',        'source' => ['type' => 'catalog', 'ref' => 'sku']],
         ['enabled' => true, 'kind' => 'tag',       'name' => 'price',     'source' => ['type' => 'field',   'ref' => 'price']],
         ['enabled' => true, 'kind' => 'tag',       'name' => 'oldprice',  'source' => ['type' => 'field',   'ref' => 'oldprice']],
@@ -44,7 +56,16 @@ final class SettingsRepository
         }
 
         /** @var array<string,mixed> $row */
-        $row['offer_mapping_array'] = json_decode((string) $row['offer_mapping'], true) ?: self::DEFAULT_OFFER_MAPPING;
+        $mapping = json_decode((string) $row['offer_mapping'], true);
+        if (!is_array($mapping) || $mapping === [] || $mapping === self::LEGACY_OFFER_MAPPING) {
+            // Пустой или нетронутый прежний дефолт — переключаем на новый:
+            // артикул/название из файла, цена из каталога.
+            $mapping = self::DEFAULT_OFFER_MAPPING;
+            Db::run('UPDATE yx_feed_settings SET offer_mapping = ? WHERE id = 1', [
+                json_encode(self::DEFAULT_OFFER_MAPPING, JSON_UNESCAPED_UNICODE),
+            ]);
+        }
+        $row['offer_mapping_array'] = $mapping;
         $row['outlets_array'] = json_decode((string) $row['outlets'], true) ?: self::DEFAULT_OUTLETS;
 
         return $row;

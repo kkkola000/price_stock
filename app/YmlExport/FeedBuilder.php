@@ -8,21 +8,41 @@ use RuntimeException;
 use XMLWriter;
 
 /**
- * Сборка YML-фида в кэш-файл storage/feeds.
+ * Сборка YML-фидов в кэш-файлы storage/feeds — по файлу на каждую ссылку.
  *
- * Оффер = товар каталога, подтверждённый администратором; цены и прочие
- * поля берутся из позиций складов по правилам конструктора тегов
- * (столбец файла / семантическое поле / каталог / константа),
- * остатки — блоком outlets по всем складам с подтверждённой парой.
+ * Оффер = товар каталога, подтверждённый администратором; артикул и название
+ * берутся из загруженного файла склада, цена и остаток — из карточки каталога
+ * (если в каталоге остатка нет — значение из файла по соответствиям
+ * администратора). Прочие поля — по правилам конструктора тегов (столбец
+ * файла / семантическое поле / каталог / константа), остатки — блоком
+ * outlets по складам, выбранным для конкретной ссылки.
  */
 final class FeedBuilder
 {
     /**
-     * Собирает фид и возвращает статистику.
+     * Собирает все ссылки и возвращает суммарную статистику.
      *
+     * @return array{feeds:int,offers:int}
+     */
+    public static function buildAll(): array
+    {
+        $feeds = FeedRepository::list();
+        $offers = 0;
+        foreach ($feeds as $feed) {
+            $offers += self::buildFeed($feed)['offers'];
+        }
+
+        return ['feeds' => count($feeds), 'offers' => $offers];
+    }
+
+    /**
+     * Собирает один фид по строке ссылки (yx_feeds + warehouse_ids)
+     * и возвращает статистику. Ссылка без складов даёт пустой фид.
+     *
+     * @param array<string,mixed> $feed
      * @return array{offers:int,path:string}
      */
-    public static function build(): array
+    public static function buildFeed(array $feed): array
     {
         $settings = SettingsRepository::get();
         $mapping = $settings['offer_mapping_array'];
@@ -30,21 +50,29 @@ final class FeedBuilder
         $onlyConfirmed = (int) $settings['only_confirmed'] === 1;
         $stockMap = StockMapRepository::map();
         $stockFallback = (int) ($settings['stock_fallback'] ?? 0);
-        $virtualWarehouses = WarehouseRepository::virtualList();
+
+        $warehouseIds = array_values(array_filter(array_map('intval', $feed['warehouse_ids'] ?? [])));
+        $virtualWarehouses = WarehouseRepository::virtualList($warehouseIds);
 
         $statuses = $onlyConfirmed ? "('confirmed')" : "('confirmed','suggested')";
 
-        $rows = Db::all(
-            "SELECT m.product_id, m.product_sku, m.warehouse_id, m.item_sku,
-                    w.name AS warehouse_name, w.sort AS warehouse_sort,
-                    i.name AS item_name, i.sku AS item_sku_live, i.stock_qty, i.stock_text,
-                    i.price, i.oldprice, i.min_price, i.extra
-             FROM yx_matches m
-             JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1 AND w.in_feed = 1
-             LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
-             WHERE m.status IN {$statuses}
-             ORDER BY m.product_id, w.sort, w.id"
-        );
+        if ($warehouseIds === []) {
+            $rows = [];
+        } else {
+            $placeholders = implode(',', array_fill(0, count($warehouseIds), '?'));
+            $rows = Db::all(
+                "SELECT m.product_id, m.product_sku, m.warehouse_id, m.item_sku,
+                        w.name AS warehouse_name, w.sort AS warehouse_sort,
+                        i.name AS item_name, i.sku AS item_sku_live, i.stock_qty, i.stock_text,
+                        i.price, i.oldprice, i.min_price, i.extra
+                 FROM yx_matches m
+                 JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1
+                 LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
+                 WHERE m.status IN {$statuses} AND m.warehouse_id IN ({$placeholders})
+                 ORDER BY m.product_id, w.sort, w.id",
+                $warehouseIds
+            );
+        }
 
         // Группируем склады по товару каталога; без product_id — по позиции склада.
         $groups = [];
@@ -60,7 +88,7 @@ final class FeedBuilder
             throw new RuntimeException('Не удалось создать каталог storage/feeds (проверьте права).');
         }
 
-        $file = self::path((string) $settings['token']);
+        $file = self::path((string) $feed['token']);
         $temp = $file . '.tmp';
 
         $xml = new XMLWriter();
@@ -107,7 +135,7 @@ final class FeedBuilder
 
         rename($temp, $file);
 
-        SettingsRepository::markBuilt($offers);
+        FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
 
         return ['offers' => $offers, 'path' => $file];
     }
@@ -154,11 +182,30 @@ final class FeedBuilder
         // Приоритетный склад (меньше sort) — оттуда берутся значения тегов оффера.
         $primary = $group[0];
 
-        // Остаток каждой строки: число из файла как есть, текст («Более 5») —
-        // через соответствия администратора, иначе fallback из настроек.
+        // Остаток из карточки каталога важнее значения в файле склада:
+        // число как есть, текст («Более 5») — через соответствия администратора.
+        // Если в каталоге остатка нет — используется значение из файла.
+        $catalogQty = null;
+        $product = self::product(
+            $primary['product_id'] !== null ? (int) $primary['product_id'] : null,
+            $productCache
+        );
+        if ($product !== null) {
+            if ($product['stock_qty'] !== null) {
+                $catalogQty = max(0, (int) $product['stock_qty']);
+            } else {
+                $catalogQty = StockMapRepository::match(
+                    $product['stock_text'] !== null ? (string) $product['stock_text'] : null,
+                    $stockMap
+                );
+            }
+        }
+
+        // Остаток каждой строки: каталог, затем число из файла как есть,
+        // затем текст через соответствия, иначе fallback из настроек.
         $totalStock = 0;
         foreach ($group as $idx => $row) {
-            $group[$idx]['resolved_qty'] = StockMapRepository::resolve(
+            $group[$idx]['resolved_qty'] = $catalogQty ?? StockMapRepository::resolve(
                 $row['stock_qty'] !== null ? (int) $row['stock_qty'] : null,
                 $row['stock_text'] !== null ? (string) $row['stock_text'] : null,
                 $stockMap,
@@ -237,7 +284,7 @@ final class FeedBuilder
      * Значение тега по правилу конструктора:
      * field — разобранное поле файла склада (price, oldprice, min_price, sku, name, stock);
      * column — сырой столбец по букве (A, B, C...) из загруженного файла;
-     * catalog — поле товара каталога (sku, name);
+     * catalog — поле товара каталога (sku, name, price, price_text, stock, stock_text);
      * constant — текстовая константа.
      *
      * @param array<string,mixed> $source
@@ -277,16 +324,23 @@ final class FeedBuilder
                 return trim((string) ($extra[$letter] ?? ''));
 
             case 'catalog':
-                $productId = $primary['product_id'] !== null ? (int) $primary['product_id'] : null;
-                if ($productId === null) {
-                    return $ref === 'sku' ? (string) ($primary['product_sku'] ?? '') : '';
-                }
-                if (!array_key_exists($productId, $productCache)) {
-                    $productCache[$productId] = Db::first('SELECT id, sku, name FROM products WHERE id = ?', [$productId]);
-                }
-                $product = $productCache[$productId];
+                $product = self::product(
+                    $primary['product_id'] !== null ? (int) $primary['product_id'] : null,
+                    $productCache
+                );
                 if ($product === null) {
                     return $ref === 'sku' ? (string) ($primary['product_sku'] ?? '') : '';
+                }
+                if ($ref === 'price') {
+                    $formatted = self::formatNumber($product['price'] ?? null);
+                    if ($formatted === '' && is_numeric(trim((string) ($product['price_text'] ?? '')))) {
+                        $formatted = self::formatNumber(trim((string) $product['price_text']));
+                    }
+
+                    return $formatted;
+                }
+                if ($ref === 'stock') {
+                    return $product['stock_qty'] !== null ? (string) max(0, (int) $product['stock_qty']) : '';
                 }
 
                 return (string) ($product[$ref] ?? '');
@@ -296,6 +350,27 @@ final class FeedBuilder
         }
 
         return '';
+    }
+
+    /**
+     * Товар каталога с кэшем на одну сборку.
+     *
+     * @param array<int,array<string,mixed>|null> $cache
+     * @return array<string,mixed>|null
+     */
+    private static function product(?int $id, array &$cache): ?array
+    {
+        if ($id === null || $id <= 0) {
+            return null;
+        }
+        if (!array_key_exists($id, $cache)) {
+            $cache[$id] = Db::first(
+                'SELECT id, sku, name, price, price_text, stock_qty, stock_text FROM products WHERE id = ?',
+                [$id]
+            );
+        }
+
+        return $cache[$id];
     }
 
     /** Число для XML: целые без дробной части (9760), дробные с точкой. */

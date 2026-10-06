@@ -68,15 +68,27 @@ final class WarehouseRepository
     }
 
     /**
-     * Виртуальные склады без файла: попадают в outlets каждого оффера
-     * с постоянным остатком default_stock.
+     * Виртуальные склады без файла из заданного набора id: попадают
+     * в outlets каждого оффера с постоянным остатком default_stock.
+     * Членство склада в фиде определяется таблицей yx_feed_warehouses,
+     * поэтому сюда уже приходят только id, выбранные для конкретной ссылки.
      *
+     * @param list<int> $warehouseIds
      * @return list<array<string,mixed>>
      */
-    public static function virtualList(): array
+    public static function virtualList(array $warehouseIds): array
     {
+        $warehouseIds = array_values(array_filter(array_map('intval', $warehouseIds)));
+        if ($warehouseIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($warehouseIds), '?'));
+
         return Db::all(
-            "SELECT * FROM yx_warehouses WHERE kind = 'virtual' AND is_active = 1 AND in_feed = 1 ORDER BY sort, id"
+            "SELECT * FROM yx_warehouses
+             WHERE kind = 'virtual' AND is_active = 1 AND id IN ({$placeholders})
+             ORDER BY sort, id",
+            $warehouseIds
         );
     }
 

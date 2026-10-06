@@ -4,30 +4,31 @@ declare(strict_types=1);
 require_once dirname(__DIR__, 2) . '/app/bootstrap.php';
 
 use App\YmlExport\FeedBuilder;
+use App\YmlExport\FeedRepository;
 use App\YmlExport\Schema;
-use App\YmlExport\SettingsRepository;
 
 /**
- * Публичная выдача YML-фида по токену.
+ * Публичная выдача YML-фида по токену ссылки (yx_feeds).
  * Отдаёт готовый кэш-файл из storage/feeds — без запросов к базе на каждый хит
  * (запрос нужен только один раз для проверки токена).
  */
 
 try {
     Schema::ensure();
+    FeedRepository::ensureDefault();
 
-    $settings = SettingsRepository::get();
     $token = (string) ($_GET['token'] ?? '');
+    $feed = $token !== '' ? FeedRepository::findByToken($token) : null;
 
-    if ($token === '' || !hash_equals((string) $settings['token'], $token)) {
+    if ($feed === null) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=utf-8');
         exit('Недействительная ссылка на фид.');
     }
 
-    $file = FeedBuilder::path((string) $settings['token']);
+    $file = FeedBuilder::path((string) $feed['token']);
     if (!is_file($file)) {
-        FeedBuilder::build();
+        FeedBuilder::buildFeed($feed);
     }
 
     header('Content-Type: application/xml; charset=utf-8');
