@@ -171,6 +171,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('yml.php?tab=matches');
             break;
 
+        case 'match-unmatch':
+            Matcher::unmatch((int) ($_POST['match_id'] ?? 0));
+            flash('success', 'Сопоставление удалено — позиция вернулась в очередь «К сопоставлению».');
+            rebuildQuiet();
+            redirect('yml.php?tab=matches&sub=items');
+            break;
+
+        case 'warehouses-feed-save':
+            $checkedIds = array_map('intval', (array) ($_POST['in_feed'] ?? []));
+            foreach (WarehouseRepository::list() as $wh) {
+                WarehouseRepository::setInFeed((int) $wh['id'], in_array((int) $wh['id'], $checkedIds, true));
+            }
+            flash('success', 'Состав складов в фиде сохранён.');
+            rebuildQuiet();
+            redirect('yml.php?tab=feed');
+            break;
+
         case 'settings-save':
             handleSettingsSave();
             break;
@@ -444,10 +461,12 @@ if ($tab === 'settings' && isset($_GET['add_stock'])) {
     $stockMapRows[] = ['pattern' => '', 'qty' => 0]; // пустая строка по кнопке «+ Добавить соответствие»
 }
 
-$queue = $tab === 'matches' ? Matcher::queue() : [];
+$matchesSub = (string) ($_GET['sub'] ?? 'queue') === 'items' ? 'items' : 'queue';
+$queue = ($tab === 'matches' && $matchesSub === 'queue') ? Matcher::queue() : [];
+$confirmedRows = ($tab === 'matches' && $matchesSub === 'items') ? Matcher::confirmedList() : [];
 $manualMatch = null;
 $candidates = [];
-if ($tab === 'matches' && isset($_GET['match_id'])) {
+if ($tab === 'matches' && $matchesSub === 'queue' && isset($_GET['match_id'])) {
     $matchId = (int) $_GET['match_id'];
     foreach (Matcher::queue(1000) as $row) {
         if ((int) $row['id'] === $matchId) {
@@ -801,6 +820,14 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 
 <?php elseif ($tab === 'matches'): ?>
   <!-- ================= Сопоставление ================= -->
+  <div class="tabs" style="margin-bottom:14px">
+    <a href="yml.php?tab=matches&sub=queue" class="<?= $matchesSub === 'queue' ? 'is-active' : '' ?>">К сопоставлению
+      <?php if ($pendingCount > 0): ?><span class="pill pill--running"><?= (int) $pendingCount ?></span><?php endif; ?></a>
+    <a href="yml.php?tab=matches&sub=items" class="<?= $matchesSub === 'items' ? 'is-active' : '' ?>">Товары
+      <?php if ((int) $matchStats['confirmed'] > 0): ?><span class="pill pill--ok"><?= (int) $matchStats['confirmed'] ?></span><?php endif; ?></a>
+  </div>
+
+<?php if ($matchesSub === 'queue'): ?>
   <div class="toolbar">
     <div class="toolbar__stats">
       <span class="stat"><b><?= (int) $matchStats['suggested'] ?></b> ждут подтверждения</span>
@@ -920,6 +947,61 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       </tbody>
     </table>
   </div>
+
+<?php else: ?>
+  <!-- ================= Товары (подтверждённые сопоставления) ================= -->
+  <div class="card table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Моя позиция</th><th></th><th>Товар каталога</th><th>Совпадение</th><th></th></tr>
+      </thead>
+      <tbody>
+      <?php if ($confirmedRows === []): ?>
+        <tr><td colspan="5" class="muted">Подтверждённых сопоставлений пока нет — они появятся здесь после подтверждения в очереди «К сопоставлению».</td></tr>
+      <?php endif; ?>
+      <?php foreach ($confirmedRows as $row): ?>
+        <tr>
+          <td>
+            <b><?= e((string) ($row['item_name'] ?? $row['item_sku'])) ?></b><br>
+            <span class="muted small mono"><?= e((string) $row['item_sku']) ?> · <?= e((string) $row['warehouse_name']) ?><?= $row['stock_qty'] !== null ? ' · остаток ' . (int) $row['stock_qty'] : '' ?></span>
+          </td>
+          <td class="match-arrow">→</td>
+          <td>
+            <?php if ($row['product_name'] !== null): ?>
+              <b><?= e((string) $row['product_name']) ?></b><br>
+              <span class="muted small mono"><?= e((string) $row['product_sku_live']) ?></span>
+            <?php else: ?>
+              <span class="muted">Товар удалён из каталога (был <?= e((string) $row['product_sku']) ?>)</span>
+            <?php endif; ?>
+          </td>
+          <td>
+            <?php if ($row['method'] === 'sku'): ?>
+              <span class="pill pill--ok">артикул <?= (int) $row['score'] ?>%</span>
+            <?php elseif ($row['method'] === 'name'): ?>
+              <span class="pill pill--running">название <?= (int) $row['score'] ?>%</span>
+            <?php elseif ($row['method'] === 'manual'): ?>
+              <span class="pill pill--ok">вручную</span>
+            <?php else: ?>
+              <span class="pill pill--never">—</span>
+            <?php endif; ?>
+          </td>
+          <td class="row-actions">
+            <form method="post" class="inline" onsubmit="return confirm('Удалить сопоставление? Позиция вернётся в очередь «К сопоставлению».')">
+              <?= Csrf::field() ?>
+              <input type="hidden" name="action" value="match-unmatch">
+              <input type="hidden" name="match_id" value="<?= (int) $row['id'] ?>">
+              <button class="btn btn--small btn--danger">Удалить сопоставление</button>
+            </form>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php if (count($confirmedRows) >= 500): ?>
+    <p class="muted small">Показаны первые 500 подтверждённых сопоставлений.</p>
+  <?php endif; ?>
+<?php endif; ?>
 
 <?php elseif ($tab === 'settings'): ?>
   <!-- ================= Настройка фида ================= -->
@@ -1054,6 +1136,35 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
   <?php else: ?>
     <div class="alert alert--warning">Фид ещё не собирался — нажмите «Пересобрать сейчас».</div>
   <?php endif; ?>
+
+  <div class="card">
+    <h2 class="card__title">Склады в фиде</h2>
+    <p class="card__hint">Только отмеченные склады попадают в YML: их остатки идут в outlets, цены оффера берутся по приоритету. Отключённые склады в фид не попадут независимо от галочки.</p>
+    <form method="post">
+      <?= Csrf::field() ?>
+      <input type="hidden" name="action" value="warehouses-feed-save">
+      <?php if ($warehouses === []): ?>
+        <p class="muted">Складов пока нет — создайте их на вкладке «Склады и загрузка».</p>
+      <?php endif; ?>
+      <?php foreach ($warehouses as $wh): ?>
+        <label class="check-inline" style="display:block">
+          <input type="checkbox" name="in_feed[]" value="<?= (int) $wh['id'] ?>"<?= chk((int) ($wh['in_feed'] ?? 1) === 1) ?>>
+          <b><?= e((string) $wh['name']) ?></b>
+          <?php if ((string) ($wh['kind'] ?? 'file') === 'virtual'): ?>
+            <span class="pill pill--running">виртуальный · <?= (int) ($wh['default_stock'] ?? 0) ?></span>
+          <?php endif; ?>
+          <?php if ((int) $wh['is_active'] !== 1): ?>
+            <span class="pill pill--disabled">отключён</span>
+          <?php endif; ?>
+        </label>
+      <?php endforeach; ?>
+      <?php if ($warehouses !== []): ?>
+        <div class="form__actions">
+          <button class="btn btn--primary">Сохранить</button>
+        </div>
+      <?php endif; ?>
+    </form>
+  </div>
 
   <div class="card">
     <h2 class="card__title">Ссылка на фид</h2>
