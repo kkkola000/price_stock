@@ -116,6 +116,7 @@ $isFiltered = CatalogRequest::isFiltered($filters);
   <main class="catalog">
     <div class="catalog__head">
       <span class="catalog__total" id="js-total-inline"><?= e(Catalog::foundLabel($result['total'])) ?></span>
+      <a class="price-changes-link" href="price-changes.php">Последние изменения цен</a>
       <button type="button" class="link-reset<?= $isFiltered ? '' : ' is-hidden' ?>" id="js-reset-inline">Сбросить фильтры</button>
     </div>
 

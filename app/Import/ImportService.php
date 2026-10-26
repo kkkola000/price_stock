@@ -10,6 +10,7 @@ use App\Import\Readers\XlsxReader;
 use App\Import\Readers\YmlReader;
 use App\Models\ImportRunRepository;
 use App\Models\ProductRepository;
+use App\Models\PriceChangeRepository;
 use App\Models\SourceRepository;
 use App\Support\Config;
 use App\Support\Db;
@@ -45,6 +46,7 @@ final class ImportService
             [$path, $isTemp] = Fetcher::resolve($source);
             $tempFile = $isTemp ? $path : null;
 
+            PriceChangeRepository::snapshot($sourceId);
             $batch = [];
             self::$lastReader = null;
             $iterator = $source['type'] === 'yml'
@@ -95,6 +97,7 @@ final class ImportService
                 $message .= ' Примеры пропусков: ' . implode('; ', $errors);
             }
 
+            PriceChangeRepository::record($sourceId, $runId);
             ImportRunRepository::finish($runId, 'ok', $stats, $message);
             Db::run(
                 "UPDATE sources SET last_status = 'ok', last_success_at = NOW(), last_error = NULL WHERE id = ?",
