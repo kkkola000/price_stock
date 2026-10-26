@@ -71,7 +71,7 @@ use App\Models\ProductRepository;
   <?php else: ?>
     <div class="card table-wrap">
       <table class="table">
-        <thead><tr><th>Название</th><th>Артикул</th><th class="num">Цена</th><th>Наличие</th><th>Фото</th></tr></thead>
+        <thead><tr><th>Название</th><th>Артикул</th><th class="num">Цена</th><th class="num">Цена промо</th><th>Наличие</th><th>Фото</th></tr></thead>
         <tbody>
         <?php foreach ($preview['mapped'] as $product): ?>
           <tr>
@@ -79,6 +79,10 @@ use App\Models\ProductRepository;
             <td data-label="Артикул" class="mono"><?= e($product['sku']) ?></td>
             <td data-label="Цена" class="num">
               <?= e(price_label((string) ($product['price_text'] ?? ''), $product['price'], $product['currency'])) ?>
+            </td>
+            <td data-label="Цена промо" class="num">
+              <?= isset($product['promo_price']) && (float) $product['promo_price'] > 0
+                  ? e(price_label((string) ($product['promo_price_text'] ?? ''), (float) $product['promo_price'], (string) $product['currency'])) : '—' ?>
             </td>
             <td data-label="Наличие">
               <?= e($product['stock_text'] !== '' ? $product['stock_text'] : '—') ?>
@@ -97,7 +101,7 @@ use App\Models\ProductRepository;
   <h2 class="a-subtitle">Последние загруженные товары этого поставщика</h2>
   <div class="card table-wrap">
     <table class="table">
-      <thead><tr><th>Название</th><th>Артикул</th><th class="num">Цена</th><th>Наличие</th><th>Обновлён</th></tr></thead>
+      <thead><tr><th>Название</th><th>Артикул</th><th class="num">Цена</th><th class="num">Цена промо</th><th>Наличие</th><th>Обновлён</th></tr></thead>
       <tbody>
       <?php foreach ($sample as $product): ?>
         <tr>
@@ -110,6 +114,10 @@ use App\Models\ProductRepository;
                 (string) $product['currency']
             )) ?>
           </td>
+          <td data-label="Цена промо" class="num">
+              <?= isset($product['promo_price']) && (float) $product['promo_price'] > 0
+                  ? e(price_label((string) ($product['promo_price_text'] ?? ''), (float) $product['promo_price'], (string) $product['currency'])) : '—' ?>
+            </td>
           <td data-label="Наличие">
             <?= e(($product['stock_text'] ?? '') !== '' ? $product['stock_text'] : ProductRepository::AVAILABILITY[$product['availability']]) ?>
           </td>

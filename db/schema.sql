@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS products (
   name          VARCHAR(512) NOT NULL,
   price         DECIMAL(14,2) NULL COMMENT 'Числовое значение — для сортировки',
   price_text    VARCHAR(190) NULL COMMENT 'Цена в том виде, как её передал поставщик',
+  promo_price   DECIMAL(14,2) NULL,
+  promo_price_text VARCHAR(190) NULL,
   currency      VARCHAR(8)   NOT NULL DEFAULT 'RUB',
   stock_qty     INT          NULL,
   stock_text    VARCHAR(190) NULL COMMENT 'Наличие в том виде, как его передал поставщик',

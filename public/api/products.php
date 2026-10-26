@@ -37,6 +37,9 @@ try {
                     $item['price'] === null ? null : (float) $item['price'],
                     (string) $item['currency']
                 ),
+                'promo_price'  => isset($item['promo_price']) ? (float) $item['promo_price'] : null,
+                'promo_price_text' => isset($item['promo_price']) && (float) $item['promo_price'] > 0
+                    ? price_label((string) ($item['promo_price_text'] ?? ''), (float) $item['promo_price'], (string) $item['currency']) : '',
                 'currency'     => $item['currency'],
                 'stock_qty'    => $item['stock_qty'] === null ? null : (int) $item['stock_qty'],
                 'stock_text'   => $item['stock_text'],

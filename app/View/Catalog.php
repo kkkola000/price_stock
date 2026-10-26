@@ -31,13 +31,20 @@ final class Catalog
             (string) $product['currency']
         );
 
+        $hasPromo = isset($product['promo_price']) && (float) $product['promo_price'] > 0;
+        $promoLabel = $hasPromo ? price_label(
+            (string) ($product['promo_price_text'] ?? ''),
+            (float) $product['promo_price'],
+            (string) $product['currency']
+        ) : '';
+
         // Данные для заказа держим прямо в карточке: страница заказов собирает
         // список из них, не обращаясь к серверу повторно
         $html = '<article class="card"'
             . ' data-id="' . (int) $product['id'] . '"'
             . ' data-sku="' . e($product['sku']) . '"'
             . ' data-name="' . e($product['name']) . '"'
-            . ' data-price="' . e($priceLabel) . '"'
+            . ' data-price="' . e($hasPromo ? $promoLabel : $priceLabel) . '"'
             . ' data-stock="' . e($stockText) . '"'
             . ' data-supplier="' . e($product['supplier_name']) . '"'
             . ' data-supplier-id="' . (int) $product['source_id'] . '">';
@@ -51,7 +58,11 @@ final class Catalog
         $html .= '<h3 class="card__title">' . e($product['name']) . '</h3>';
         $html .= '<div class="card__sku" title="Артикул"><span class="card__sku-icon">#</span>' . e($product['sku']) . '</div>';
         $html .= '<div class="card__footer">';
-        $html .= '<span class="card__price">' . e($priceLabel) . '</span>';
+        $html .= $hasPromo
+            ? '<span class="card__price card__price--promo"><s class="card__price-old">' . e($priceLabel)
+                . '</s><span class="card__price-caption">Цена по акции</span><span class="card__price-current">'
+                . e($promoLabel) . '</span></span>'
+            : '<span class="card__price">' . e($priceLabel) . '</span>';
         $html .= '<span class="card__supplier" title="Поставщик">' . e($product['supplier_name']) . '</span>';
         $html .= '<button type="button" class="order-btn js-order-toggle" data-order-id="' . (int) $product['id'] . '"'
             . ' title="Добавить в заказ" aria-label="Добавить в заказ" aria-pressed="false">'

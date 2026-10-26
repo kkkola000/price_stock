@@ -263,7 +263,8 @@ final class ImportService
             $get('currency'),
             $source,
             $errors,
-            $line
+            $line,
+            $get('promo_price')
         );
     }
 
@@ -322,7 +323,8 @@ final class ImportService
             $get('currency'),
             $source,
             $errors,
-            $line
+            $line,
+            $get('promo_price')
         );
     }
 
@@ -340,7 +342,8 @@ final class ImportService
         string $rawCurrency,
         array $source,
         array &$errors,
-        int $line = 0
+        int $line = 0,
+        string $rawPromoPrice = ''
     ): ?array {
         $mapping = $source['mapping_array'] ?? [];
 
@@ -390,6 +393,8 @@ final class ImportService
             'name'         => $name,
             'price'        => $price,
             'price_text'   => $priceText,
+            'promo_price'  => ValueParser::price($rawPromoPrice),
+            'promo_price_text' => ValueParser::text($rawPromoPrice, 190),
             'currency'     => ValueParser::currency($rawCurrency, $fallbackCurrency),
             'stock_qty'    => $stock['qty'],
             'stock_text'   => $stock['text'],
