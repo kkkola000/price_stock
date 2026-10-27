@@ -60,6 +60,7 @@ FeedRepository::ensureDefault();
 
 $adminId = (int) ($_SESSION['admin_id'] ?? 0);
 $tab = (string) ($_GET['tab'] ?? 'warehouses');
+Matcher::cleanupOrphans();
 
 /** Пересборка фидов без падения страницы: ошибка уйдёт в лог и flash. */
 function rebuildQuiet(): void

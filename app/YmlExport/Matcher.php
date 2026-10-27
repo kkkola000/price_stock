@@ -96,7 +96,7 @@ final class Matcher
     public static function find(int $id): ?array
     {
         return Db::first('SELECT m.*, i.name AS item_name, w.name AS warehouse_name
-            FROM yx_matches m LEFT JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
+            FROM yx_matches m JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
             JOIN yx_warehouses w ON w.id=m.warehouse_id WHERE m.id=?', [$id]);
     }
 
@@ -193,8 +193,8 @@ final class Matcher
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
              FROM yx_matches m
-             LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
-             LEFT JOIN yx_warehouses w ON w.id = m.warehouse_id
+             JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
+             JOIN yx_warehouses w ON w.id = m.warehouse_id
              LEFT JOIN products p ON p.id = m.product_id
              WHERE m.status = 'confirmed' AND (" . $search . ")
              ORDER BY w.sort, w.id, m.id
@@ -215,8 +215,8 @@ final class Matcher
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
              FROM yx_matches m
-             LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
-             LEFT JOIN yx_warehouses w ON w.id = m.warehouse_id
+             JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
+             JOIN yx_warehouses w ON w.id = m.warehouse_id
              LEFT JOIN products p ON p.id = m.product_id
              WHERE m.status IN ('suggested', 'unmatched') AND (" . $search . ")
              ORDER BY (m.status = 'suggested') DESC, m.score DESC, m.id
@@ -224,10 +224,23 @@ final class Matcher
         );
     }
 
+    /** Repair old deletions without erasing confirmations for temporarily missing file rows. */
+    public static function cleanupOrphans(): int
+    {
+        return Db::run('DELETE m FROM yx_matches m
+            LEFT JOIN yx_warehouses w ON w.id=m.warehouse_id
+            LEFT JOIN yx_uploads u ON u.warehouse_id=m.warehouse_id
+            LEFT JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
+            WHERE w.id IS NULL OR (u.id IS NULL AND i.id IS NULL)')->rowCount();
+    }
+
     /** @return array<string,int> */
     public static function stats(): array
     {
-        $rows = Db::all('SELECT status, COUNT(*) AS c FROM yx_matches GROUP BY status');
+        $rows = Db::all('SELECT m.status, COUNT(*) AS c FROM yx_matches m
+            JOIN yx_warehouses w ON w.id=m.warehouse_id
+            JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
+            GROUP BY m.status');
         $stats = ['suggested' => 0, 'confirmed' => 0, 'rejected' => 0, 'unmatched' => 0];
         foreach ($rows as $row) {
             $stats[(string) $row['status']] = (int) $row['c'];

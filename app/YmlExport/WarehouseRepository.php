@@ -96,12 +96,19 @@ final class WarehouseRepository
     public static function delete(int $id): void
     {
         $upload = Db::first('SELECT file_path FROM yx_uploads WHERE warehouse_id = ?', [$id]);
-        if ($upload !== null && !empty($upload['file_path'])) {
-            $path = APP_STORAGE . '/uploads/' . basename((string) $upload['file_path']);
-            if (is_file($path)) {
-                @unlink($path);
-            }
+        $pdo=Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            Db::run('DELETE FROM yx_matches WHERE warehouse_id = ?', [$id]);
+            Db::run('DELETE FROM yx_warehouses WHERE id = ?', [$id]);
+            $pdo->commit();
+        } catch (\Throwable $exception) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $exception;
         }
-        Db::run('DELETE FROM yx_warehouses WHERE id = ?', [$id]);
+        if ($upload !== null && !empty($upload['file_path'])) {
+            $path=APP_STORAGE.'/uploads/'.basename((string)$upload['file_path']);
+            if (is_file($path)) @unlink($path);
+        }
     }
 }

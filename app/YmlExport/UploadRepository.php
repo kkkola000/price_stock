@@ -127,14 +127,22 @@ final class UploadRepository
     public static function delete(int $id): void
     {
         $upload = self::find($id);
-        if ($upload !== null && !empty($upload['file_path'])) {
-            $path = APP_STORAGE . '/uploads/' . basename((string) $upload['file_path']);
-            if (is_file($path)) {
-                @unlink($path);
-            }
+        if ($upload === null) return;
+        $pdo=Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            Db::run('DELETE FROM yx_matches WHERE warehouse_id = ?', [(int)$upload['warehouse_id']]);
+            Db::run('DELETE FROM yx_items WHERE upload_id = ?', [$id]);
+            Db::run('DELETE FROM yx_uploads WHERE id = ?', [$id]);
+            $pdo->commit();
+        } catch (\Throwable $exception) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $exception;
         }
-        Db::run('DELETE FROM yx_items WHERE upload_id = ?', [$id]);
-        Db::run('DELETE FROM yx_uploads WHERE id = ?', [$id]);
+        if (!empty($upload['file_path'])) {
+            $path=APP_STORAGE.'/uploads/'.basename((string)$upload['file_path']);
+            if (is_file($path)) @unlink($path);
+        }
     }
 
     public static function markStatus(int $id, string $status, ?string $error, int $itemsCount): void
