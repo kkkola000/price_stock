@@ -1075,16 +1075,14 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 
     <div class="card">
       <h2 class="card__title">Конструктор YML</h2>
-      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Для вложенности выберите родителя; порядок меняется стрелками. Изменения применяются после сохранения. Для полей магазина и корневого элемента используйте источник «Константа».</p>
-      <div class="grid-3">
-        <?php foreach (['root_name'=>'Корневой элемент','shop_name'=>'Блок магазина','offers_name'=>'Список товаров','offer_name'=>'Элемент товара'] as $key=>$label): ?>
-          <label class="field"><span class="field__label"><?= e($label) ?></span><input class="input mono" name="outlets[<?= e($key) ?>]" value="<?= e((string)($settings['outlets_array'][$key] ?? ['root_name'=>'yml_catalog','shop_name'=>'shop','offers_name'=>'offers','offer_name'=>'offer'][$key])) ?>"></label>
-        <?php endforeach; ?>
-      </div>
+      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Вложенность показана отступами. Родитель и тип элемента меняются через «Настроить элемент»; порядок — стрелками. Изменения применяются после сохранения. Для полей магазина и корневого элемента используйте источник «Константа».</p>
       <?php $xmlNodes=$settings['offer_mapping_array']; ?>
       <div class="table-wrap"><table class="table table--compact xml-tree" id="xml-tree">
-        <thead><tr><th>Вкл.</th><th>Элемент / повторение</th><th>Имя в XML</th><th>Родитель</th><th>Источник / поле</th><th>Порядок</th></tr></thead>
+        <thead><tr><th>Вкл.</th><th>Элемент</th><th>Имя в XML</th><th>Источник</th><th>Поле / значение</th><th>Действия</th></tr></thead>
         <tbody>
+          <?php foreach (['_catalog'=>['root_name','yml_catalog'], '_shop'=>['shop_name','shop'], '_offers'=>['offers_name','offers'], 'offer'=>['offer_name','offer']] as $treeKey=>[$key,$default]): ?>
+          <tr data-xml-wrapper="<?= e($treeKey) ?>"><td></td><td class="xml-tree-element"><div class="xml-tree-label"><button type="button" data-xml-collapse aria-label="Свернуть блок" aria-expanded="true">⌄</button><span data-xml-label><?= e((string)($settings['outlets_array'][$key]??$default)) ?></span><?php if ($treeKey==='offer'): ?><span class="xml-repeat-label">Для каждого товара</span><?php endif; ?></div></td><td><input class="input mono" name="outlets[<?= e($key) ?>]" value="<?= e((string)($settings['outlets_array'][$key]??$default)) ?>" aria-label="Имя блока <?= e($default) ?>"></td><td class="muted">—</td><td class="muted">—</td><td></td></tr>
+          <?php endforeach; ?>
           <?php foreach ($xmlNodes as $i=>$node) { require APP_ROOT.'/app/Views/admin/xml_node.php'; } ?>
         </tbody>
       </table></div>
@@ -1093,7 +1091,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         <button type="button" class="btn btn--ghost" data-xml-add="attribute">+ Добавить атрибут</button>
         <button type="button" class="btn btn--ghost" data-xml-add="block">+ Вложенный блок</button>
       </div>
-      <p class="field__hint">Артикул: «Поле файла → sku». Остаток с витрины с учётом соответствий: «Остаток с соответствиями → stock» внутри блока «Для каждого склада». Название склада: «Склад → name».</p>
+      <p class="field__hint">Выбирайте поля из списка: «Артикул», «Цена», «Остаток с учётом соответствий», «Название склада». Для столбца файла укажите букву, для константы — своё значение.</p>
       <p class="field__hint">Поля витрины: price, promo_price, effective_price (промоцена, иначе обычная), name, sku, stock_text. Поля файла: sku, name, price, oldprice, min_price. Столбец файла: A, B, AA.</p>
       <template id="xml-node-template"><?php $i='__INDEX__'; $node=['key'=>'__KEY__','kind'=>'tag','name'=>'new_tag','parent'=>'offer','enabled'=>true,'repeat'=>'once','source'=>['type'=>'constant','ref'=>'']]; require APP_ROOT.'/app/Views/admin/xml_node.php'; ?></template>
     </div>
