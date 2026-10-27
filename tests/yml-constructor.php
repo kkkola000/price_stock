@@ -62,6 +62,41 @@ try {
     $preview=FeedBuilder::buildFeed($previewFeed,SettingsRepository::get(),null,true);$paths[]=$preview['path'];
     ensureXml(!is_file(FeedBuilder::path($previewFeed['token']))&&$preview['offers']===1,'Dry preview does not replace a live feed');
 
+    $userTemplate=<<<'XML'
+<yml_catalog>
+    <shop>
+        <offers>
+{% для каждого товара %}
+            <offer id="{{артикул}}">
+                <outlets>
+                    <outlet instock="{{остаток}}" warehouse_name="Москва ОБН"></outlet>
+                </outlets>
+            </offer>
+{% конец %}
+        </offers>
+    </shop>
+</yml_catalog>
+XML;
+    $userVars=[['name'=>'артикул','source'=>['type'=>'field','ref'=>'sku']],['name'=>'остаток','source'=>['type'=>'resolved','ref'=>'stock']]];
+    $save($converted,['template'=>['text'=>$userTemplate,'variables'=>$userVars]]);
+    $xml=$build();$offer=$xml->shop->offers->offer;
+    ensureXml(count($xml->shop->offers->offer)===1,'User template emits one offer without warehouse repetition');
+    ensureXml((string)$offer['id']==='FILE-SKU','User template ID');
+    ensureXml((string)$offer->outlets->outlet['instock']==='10','User template maps stock directly in offer');
+    ensureXml((string)$offer->outlets->outlet['warehouse_name']==='Москва ОБН','User template literal warehouse name');
+    $diagnosticSettings=SettingsRepository::get();
+    $empty=FeedBuilder::buildFeed(['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>[]],$diagnosticSettings,null,true);$paths[]=$empty['path'];
+    ensureXml($empty['offers']===0&&$empty['diagnostic']['stats']['selected']===0,'Explain link without selected warehouses');
+    Db::run("UPDATE yx_matches SET status='suggested' WHERE product_id=?",[$product]);
+    $empty=FeedBuilder::buildFeed($previewFeed,$diagnosticSettings,null,true);$paths[]=$empty['path'];
+    ensureXml($empty['offers']===0&&str_contains($empty['diagnostic']['message'],'нет подтверждённых'),'Explain missing confirmations');
+    Db::run("UPDATE yx_matches SET status='confirmed' WHERE product_id=?",[$product]);
+    Db::run('UPDATE products SET stock_qty=0 WHERE id=?',[$product]);
+    $diagnosticSettings['skip_zero_stock']=1;
+    $empty=FeedBuilder::buildFeed($previewFeed,$diagnosticSettings,null,true);$paths[]=$empty['path'];
+    ensureXml($empty['offers']===0&&str_contains($empty['diagnostic']['message'],'нулевым'),'Explain zero-stock filter');
+    Db::run('UPDATE products SET stock_qty=NULL WHERE id=?',[$product]);
+
     $tree[]=['key'=>'custom','parent'=>'offer','kind'=>'block','name'=>'custom','enabled'=>true,'repeat'=>'once'];
     $tree[]=['key'=>'text','parent'=>'custom','kind'=>'tag','name'=>'label','enabled'=>true,'source'=>['type'=>'constant','ref'=>'Text <& " escaped']];
     $tree[]=['key'=>'attr','parent'=>'custom','kind'=>'attribute','name'=>'code','enabled'=>true,'source'=>['type'=>'column','ref'=>'A']];

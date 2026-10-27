@@ -101,12 +101,14 @@ final class FeedBuilder
         $xml->openURI($temp);
         $xml->startDocument('1.0', 'UTF-8');
         $offers = 0;
+        $skipped=['missing_items'=>0,'zero_stock'=>0,'other_product'=>0];
+        $onSkip=static function(string $reason)use(&$skipped):void {$skipped[$reason]++;};
         $productCache = [];
         if ($compiled!==null) {
-            $eachProduct=static function(callable $emit)use($groups,$xml,$mapping,$outlets,$settings,&$productCache,$stockMap,$stockFallback,$virtualWarehouses,&$offers):void {
+            $eachProduct=static function(callable $emit)use($groups,$xml,$mapping,$outlets,$settings,&$productCache,$stockMap,$stockFallback,$virtualWarehouses,&$offers,$onSkip,&$skipped):void {
                 foreach($groups as $group) {
-                    if(!empty($settings['preview_product_id'])&&(int)$group[0]['product_id']!==(int)$settings['preview_product_id'])continue;
-                    if(self::buildOffer($xml,$group,$mapping,$outlets,$settings,$productCache,$stockMap,$stockFallback,$virtualWarehouses,$emit))$offers++;
+                    if(!empty($settings['preview_product_id'])&&(int)$group[0]['product_id']!==(int)$settings['preview_product_id']){$skipped['other_product']++;continue;}
+                    if(self::buildOffer($xml,$group,$mapping,$outlets,$settings,$productCache,$stockMap,$stockFallback,$virtualWarehouses,$emit,$onSkip))$offers++;
                 }
             };
             XmlTemplate::write($xml,$compiled,(array)$template['variables'],$eachProduct,(int)$settings['oldprice_only_higher']===1);
@@ -143,7 +145,7 @@ final class FeedBuilder
         $offers = 0;
         $productCache = [];
         foreach ($groups as $group) {
-            $offer = self::buildOffer($xml, $group, $mapping, $outlets, $settings, $productCache, $stockMap, $stockFallback, $virtualWarehouses);
+            $offer = self::buildOffer($xml, $group, $mapping, $outlets, $settings, $productCache, $stockMap, $stockFallback, $virtualWarehouses, null, $onSkip);
             if ($offer) {
                 $offers++;
             }
@@ -181,7 +183,33 @@ final class FeedBuilder
 
         if (!$preview) FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
 
-        return ['offers' => $offers, 'path' => $file];
+        return ['offers' => $offers, 'path' => $file, 'diagnostic'=>$offers===0?self::diagnose($feed,$settings,$skipped):null];
+    }
+
+    /** Explain an empty result using the selected link's actual source data. */
+    public static function diagnose(array $feed,array $settings, array $skipped=[]): array
+    {
+        $ids=array_values(array_filter(array_map('intval',$feed['warehouse_ids']??[])));
+        $stats=['selected'=>count($ids),'active'=>0,'items'=>0,'confirmed'=>0,'suggested'=>0];
+        if($ids!==[]) {
+            $marks=implode(',',array_fill(0,count($ids),'?'));
+            $stats['active']=(int)Db::scalar("SELECT COUNT(*) FROM yx_warehouses WHERE id IN ($marks) AND is_active=1",$ids);
+            $stats['items']=(int)Db::scalar("SELECT COUNT(*) FROM yx_items i JOIN yx_warehouses w ON w.id=i.warehouse_id AND w.is_active=1 WHERE i.warehouse_id IN ($marks)",$ids);
+            $counts=Db::all("SELECT m.status,COUNT(*) AS n FROM yx_matches m JOIN yx_warehouses w ON w.id=m.warehouse_id AND w.is_active=1 JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku WHERE m.warehouse_id IN ($marks) GROUP BY m.status",$ids);
+            foreach($counts as $row)if(in_array($row['status'],['confirmed','suggested'],true))$stats[$row['status']]=(int)$row['n'];
+        }
+        $message=match(true) {
+            $stats['selected']===0=>'Для этой ссылки не выбраны склады. Откройте «Готовый фид → Изменить» и отметьте нужные склады.',
+            $stats['active']===0=>'Выбранные склады отключены или удалены. Включите склад либо выберите другой для этой ссылки.',
+            $stats['items']===0=>'В выбранных активных складах нет загруженных товаров. Загрузите файл остатков. Виртуальный склад сам по себе не создаёт товары.',
+            (int)$settings['only_confirmed']===1&&$stats['confirmed']===0=>'В выбранных складах нет подтверждённых сопоставлений. Подтвердите позиции во вкладке «Сопоставление» — они должны появиться в «Товары».',
+            $stats['confirmed']+$stats['suggested']===0=>'Нет сопоставленных товаров в выбранных складах. Выполните сопоставление с витриной.',
+            !empty($settings['preview_product_id'])&&!empty($skipped['other_product'])&&empty($skipped['zero_stock'])=>'Выбранный товар не входит в сопоставления этой ссылки. Выберите «Все товары выбранного фида» или другой товар.',
+            !empty($skipped['zero_stock'])=>'Подходящие товары исключены настройкой «Исключать офферы с нулевым суммарным остатком». Проверьте соответствия остатков или отключите этот фильтр.',
+            !empty($skipped['missing_items'])=>'Сопоставления ссылаются на отсутствующие позиции файла. Повторно загрузите актуальный файл склада.',
+            default=>'Сопоставления есть. Проверьте выбранный товар, фильтр нулевых остатков и пересоберите фид.',
+        };
+        return ['message'=>$message,'stats'=>$stats];
     }
 
     /** Путь к кэш-файлу фида для текущего токена. */
@@ -216,11 +244,13 @@ final class FeedBuilder
         array $stockMap,
         int $stockFallback,
         array $virtualWarehouses,
-        ?callable $consume=null
+        ?callable $consume=null,
+        ?callable $onSkip=null
     ): bool {
         // Позиции склада могли быть удалены после сопоставления — такие строки пропускаем.
         $group = array_values(array_filter($group, static fn (array $row): bool => $row['item_sku_live'] !== null));
         if ($group === []) {
+            if($onSkip!==null)$onSkip('missing_items');
             return false;
         }
 
@@ -261,6 +291,7 @@ final class FeedBuilder
         // Виртуальные склады в суммарный остаток не входят:
         // фильтр «исключать нулевые» смотрит только на реальные склады.
         if ((int) $settings['skip_zero_stock'] === 1 && $totalStock === 0) {
+            if($onSkip!==null)$onSkip('zero_stock');
             return false;
         }
 

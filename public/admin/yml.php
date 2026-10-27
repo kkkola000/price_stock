@@ -214,8 +214,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             break;
 
         case 'feed-build':
-            rebuildQuiet();
-            flash('success', 'Все фиды пересобраны.');
+            $builtOffers=0;
+            foreach(FeedRepository::list() as $feed) {
+                try {
+                    $built=FeedBuilder::buildFeed($feed);$builtOffers+=$built['offers'];
+                    if($built['diagnostic']!==null)flash('warning','Фид «'.$feed['name'].'»: '.$built['diagnostic']['message']);
+                }catch(Throwable $exception){flash('error','Фид «'.$feed['name'].'»: '.$exception->getMessage());}
+            }
+            flash('success', 'Сборка завершена. Товаров в фидах: '.$builtOffers.'.');
             redirect('yml.php?tab=feed');
             break;
     }
@@ -444,7 +450,7 @@ function handleSettingsSave(): void
                 $previewMap=array_map(static fn($row)=>['pattern'=>trim((string)preg_replace('/\s+/u',' ',str_replace('ё','е',mb_strtolower($row['pattern'],'UTF-8')))),'qty'=>$row['qty']],$stockRows);
                 $preview=FeedBuilder::buildFeed($selected,$previewSettings,$previewMap,true);
                 try {$truncated=filesize($preview['path'])>16000;$xml=(string)file_get_contents($preview['path'],false,null,0,16000);}finally{@unlink($preview['path']);}
-                $_SESSION['yml_template_preview']=['xml'=>$xml,'truncated'=>$truncated,'offers'=>$preview['offers'],'feed'=>(int)$selected['id'],'product'=>(int)($_POST['preview_product_id']??0)];
+                $_SESSION['yml_template_preview']=['xml'=>$xml,'truncated'=>$truncated,'diagnostic'=>$preview['diagnostic'],'offers'=>$preview['offers'],'feed'=>(int)$selected['id'],'product'=>(int)($_POST['preview_product_id']??0)];
             } else $_SESSION['yml_template_preview']=['xml'=>'','offers'=>0,'feed'=>0,'product'=>0];
         }catch(Throwable $exception){$errors[]=$exception->getMessage();}
     }
@@ -1152,7 +1158,10 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <button class="btn btn--ghost" name="check_template" value="1" form="yml-template-form">Проверить шаблон</button>
     </div>
     <?php if($templatePreview!==null): ?>
-      <p class="<?= $templatePreview['offers']>0?'template-status':'muted' ?>"><?= $templatePreview['offers']>0?'Шаблон корректен · Товаров: '.(int)$templatePreview['offers']:'Шаблон корректен. Для выбранного фида и товара нет подходящих сопоставлений.' ?></p>
+      <p class="<?= $templatePreview['offers']>0?'template-status':'muted' ?>"><?= $templatePreview['offers']>0?'Шаблон корректен · Товаров: '.(int)$templatePreview['offers']:'Шаблон корректен, но товары не попали в выгрузку.' ?></p>
+      <?php if(!empty($templatePreview['diagnostic'])): ?>
+        <div class="alert alert--warning"><?= e($templatePreview['diagnostic']['message']) ?><br><span class="small">Выбрано складов: <?= (int)$templatePreview['diagnostic']['stats']['selected'] ?> · активных: <?= (int)$templatePreview['diagnostic']['stats']['active'] ?> · позиций: <?= (int)$templatePreview['diagnostic']['stats']['items'] ?> · подтверждено: <?= (int)$templatePreview['diagnostic']['stats']['confirmed'] ?></span></div>
+      <?php endif; ?>
       <?php if(!empty($templatePreview['truncated'])): ?><p class="muted small">Показаны первые 16 КБ XML. Для подробного примера выберите один товар.</p><?php endif; ?>
       <pre class="feed-preview"><?= e($templatePreview['xml']) ?></pre>
     <?php else: ?><p class="muted">Нажмите «Проверить шаблон»: предпросмотр использует текущий текст, переменные и соответствия остатков без сохранения настроек.</p><?php endif; ?>
