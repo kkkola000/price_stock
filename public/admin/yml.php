@@ -17,6 +17,7 @@ use App\YmlExport\StockMapRepository;
 use App\YmlExport\UploadImporter;
 use App\YmlExport\UploadRepository;
 use App\YmlExport\WarehouseRepository;
+use App\YmlExport\XmlMapping;
 
 /**
  * Раздел «Выгрузка YML» — дополнение к админ-панели.
@@ -384,71 +385,22 @@ function handleSettingsSave(): void
 {
     $settings = SettingsRepository::get();
 
-    // Конструктор тегов из таблицы формы.
     $rules = [];
-    $names = (array) ($_POST['map_name'] ?? []);
-    $kinds = (array) ($_POST['map_kind'] ?? []);
-    $types = (array) ($_POST['map_type'] ?? []);
-    $refs = (array) ($_POST['map_ref'] ?? []);
-    $enabled = (array) ($_POST['map_enabled'] ?? []);
-    $delete = (array) ($_POST['map_delete'] ?? []);
-
     $errors = [];
-    foreach ($names as $i => $rawName) {
-        if (isset($delete[$i])) {
-            continue;
-        }
-        $name = trim((string) $rawName);
-        $kind = in_array(($kinds[$i] ?? 'tag'), ['tag', 'attribute'], true) ? (string) $kinds[$i] : 'tag';
-        $type = in_array(($types[$i] ?? 'field'), ['field', 'column', 'catalog', 'constant'], true) ? (string) $types[$i] : 'field';
-        $ref = trim((string) ($refs[$i] ?? ''));
-
-        if ($name === '') {
-            continue; // пустая строка конструктора — пропускаем
-        }
-        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/', $name)) {
-            $errors[] = 'Некорректное имя элемента XML: «' . $name . '». Допустимы латиница, цифры, _, -, .';
-            continue;
-        }
-        if ($type === 'column' && !preg_match('/^[A-Za-z]{1,3}$/', $ref)) {
-            $errors[] = 'Для источника «столбец» укажите букву (A, B, AA), получено: «' . $ref . '».';
-            continue;
-        }
-
+    $parents = (array) ($_POST['map_parent'] ?? []);
+    $keys = (array) ($_POST['map_key'] ?? []);
+    foreach ((array) ($_POST['map_name'] ?? []) as $i=>$rawName) {
         $rules[] = [
-            'enabled' => isset($enabled[$i]),
-            'kind'    => $kind,
-            'name'    => $name,
-            'source'  => ['type' => $type, 'ref' => $ref],
+            'key'=>(string)($keys[$i] ?? 'node_'.$i),
+            'parent'=>(string)($parents[$i] ?? 'offer'),
+            'name'=>trim((string)$rawName),
+            'enabled'=>isset($_POST['map_enabled'][$i]),
+            'kind'=>(string)($_POST['map_kind'][$i] ?? 'tag'),
+            'repeat'=>(string)($_POST['map_repeat'][$i] ?? 'once'),
+            'source'=>['type'=>(string)($_POST['map_type'][$i] ?? 'constant'), 'ref'=>trim((string)($_POST['map_ref'][$i] ?? ''))],
         ];
     }
-
-    // Кнопки «+ Добавить тег/атрибут» — сохраняем введённое и добавляем пустую строку.
-    $addRow = (string) ($_POST['add_row'] ?? '');
-    if ($addRow !== '') {
-        $rules[] = [
-            'enabled' => true,
-            'kind'    => $addRow === 'attribute' ? 'attribute' : 'tag',
-            'name'    => '',
-            'source'  => ['type' => 'field', 'ref' => ''],
-        ];
-    }
-
-    // Хотя бы один атрибут id у оффера должен остаться — иначе фид бессмысленный.
-    $hasId = false;
-    foreach ($rules as $rule) {
-        if ($rule['enabled'] && $rule['kind'] === 'attribute' && $rule['name'] === 'id') {
-            $hasId = true;
-            break;
-        }
-    }
-    if (!$hasId && $addRow === '') {
-        $errors[] = 'В конструкторе нужен включённый атрибут «id» — из него берётся идентификатор оффера.';
-    }
-
-    foreach ($errors as $error) {
-        flash('error', $error);
-    }
+    try { XmlMapping::validate($rules); } catch (Throwable $exception) { $errors[]=$exception->getMessage(); }
 
     $outletsInput = (array) ($_POST['outlets'] ?? []);
     $xmlName = static fn (string $v, string $default): string =>
@@ -462,20 +414,24 @@ function handleSettingsSave(): void
         'name_attr'  => $xmlName(trim((string) ($outletsInput['name_attr'] ?? '')), 'warehouse_name'),
     ];
 
-    SettingsRepository::save(
-        trim((string) ($_POST['shop_name'] ?? '')),
-        trim((string) ($_POST['shop_company'] ?? '')),
-        trim((string) ($_POST['shop_url'] ?? '')),
-        trim((string) ($_POST['currency'] ?? 'KZT')) ?: 'KZT',
-        $rules,
-        $outlets,
-        isset($_POST['only_confirmed']),
-        isset($_POST['skip_zero_stock']),
-        isset($_POST['oldprice_only_higher']),
-        max(0, (int) ($_POST['stock_fallback'] ?? 0))
-    );
+    foreach (['root_name'=>'yml_catalog','shop_name'=>'shop','offers_name'=>'offers','offer_name'=>'offer'] as $key=>$default) {
+        $value=trim((string)($outletsInput[$key] ?? $default));
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/',$value)) $errors[]='Некорректное имя XML: '.$value;
+        $outlets[$key]=$value;
+    }
+    $draft = array_merge($settings, [
+        'shop_name'=>trim((string)($_POST['shop_name']??'')),
+        'shop_company'=>trim((string)($_POST['shop_company']??'')),
+        'shop_url'=>trim((string)($_POST['shop_url']??'')),
+        'currency'=>trim((string)($_POST['currency']??'')),
+        'offer_mapping_array'=>$rules, 'outlets_array'=>$outlets,
+        'only_confirmed'=>isset($_POST['only_confirmed'])?1:0,
+        'skip_zero_stock'=>isset($_POST['skip_zero_stock'])?1:0,
+        'oldprice_only_higher'=>isset($_POST['oldprice_only_higher'])?1:0,
+        'stock_fallback'=>max(0,(int)($_POST['stock_fallback']??0)),
+    ]);
 
-    // Соответствие текстовых остатков числам («Более 5» -> 5).
+    // Соответствие текстовых остатков числам, например «Более 5» -> 10.
     // Пустые строки в базу не пишем: pattern там UNIQUE.
     $stockRows = [];
     $seenPatterns = [];
@@ -497,16 +453,27 @@ function handleSettingsSave(): void
         $seenPatterns[$key] = true;
         $stockRows[] = ['pattern' => $pattern, 'qty' => max(0, (int) ($stockQtys[$i] ?? 0))];
     }
-    StockMapRepository::replaceAll($stockRows);
-    $addStockRow = isset($_POST['add_stock_row']);
-
-    if ($errors === []) {
-        rebuildQuiet();
-        flash('success', $addRow !== '' || $addStockRow ? 'Строка добавлена.' : 'Настройки фида сохранены.');
-    } else {
-        flash('error', 'Настройки сохранены частично — исправьте отмеченные строки.');
+    if ($errors !== []) {
+        $_SESSION['yml_settings_draft']=['settings'=>$draft,'stocks'=>$stockRows];
+        foreach ($errors as $error) flash('error',$error);
+        flash('error','Настройки не сохранены. Исправьте ошибки; действующий фид не изменён.');
+        redirect('yml.php?tab=settings');
     }
-    redirect('yml.php?tab=settings' . ($addStockRow ? '&add_stock=1' : ''));
+    $pdo=Db::pdo();
+    $pdo->beginTransaction();
+    try {
+        SettingsRepository::save($draft['shop_name'],$draft['shop_company'],$draft['shop_url'],$draft['currency'],
+            $rules,$outlets,(bool)$draft['only_confirmed'],(bool)$draft['skip_zero_stock'],(bool)$draft['oldprice_only_higher'],$draft['stock_fallback']);
+        StockMapRepository::replaceAll($stockRows);
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $exception;
+    }
+    rebuildQuiet();
+    flash('success','Настройки фида сохранены. Предпросмотр показывает сохранённый XML.');
+    redirect('yml.php?tab=settings' . (isset($_POST['add_stock_row']) ? '&add_stock=1' : ''));
+
 }
 
 /* ---------- Данные для страниц ---------- */
@@ -517,6 +484,11 @@ $uploads = UploadRepository::list();
 $matchStats = Matcher::stats();
 $settings = SettingsRepository::get();
 $stockMapRows = StockMapRepository::list();
+if ($tab === 'settings' && isset($_SESSION['yml_settings_draft'])) {
+    $settings=$_SESSION['yml_settings_draft']['settings'];
+    $stockMapRows=$_SESSION['yml_settings_draft']['stocks'];
+    unset($_SESSION['yml_settings_draft']);
+}
 if ($tab === 'settings' && isset($_GET['add_stock'])) {
     $stockMapRows[] = ['pattern' => '', 'qty' => 0]; // пустая строка по кнопке «+ Добавить соответствие»
 }
@@ -605,7 +577,7 @@ function chk(bool $on): string
     return $on ? ' checked' : '';
 }
 
-$sourceTypeLabels = ['field' => 'Поле файла', 'column' => 'Столбец (буква)', 'catalog' => 'Каталог', 'constant' => 'Константа'];
+$sourceTypeLabels = ['field' => 'Поле файла', 'column' => 'Столбец (буква)', 'catalog' => 'Витрина', 'constant' => 'Константа', 'resolved'=>'Остаток с соответствиями', 'warehouse'=>'Склад'];
 $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 ?>
 <!doctype html>
@@ -1101,65 +1073,37 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       </div>
     </div>
 
-    <div class="card table-wrap">
-      <h2 class="card__title" style="padding:18px 18px 0">Конструктор оффера</h2>
-      <p class="card__hint" style="padding:0 18px">
-        Каждая строка — тег или атрибут внутри &lt;offer&gt;. Имя можно заменить на своё,
-        значение привязать к полю файла склада (price, oldprice, min_price, sku, name, stock),
-        к столбцу по букве (A, B, C…), к товару каталога (sku, name, price, price_text, stock, stock_text)
-        или к константе. По умолчанию: артикул и название — из вашего файла, цена — из каталога;
-        остаток в outlets — из каталога, а если там его нет — из файла склада.
-      </p>
-      <table class="table table--compact">
-        <thead>
-          <tr><th>Вкл.</th><th>Элемент</th><th>Имя в XML</th><th>Источник</th><th>Поле / буква / значение</th><th></th></tr>
-        </thead>
-        <tbody>
-        <?php foreach ($settings['offer_mapping_array'] as $i => $rule):
-            $src = (array) ($rule['source'] ?? []); ?>
-          <tr>
-            <td><input type="checkbox" name="map_enabled[<?= $i ?>]"<?= chk(!empty($rule['enabled'])) ?>></td>
-            <td>
-              <select class="input" name="map_kind[<?= $i ?>]">
-                <option value="tag"<?= sel('tag', (string) ($rule['kind'] ?? 'tag')) ?>>тег</option>
-                <option value="attribute"<?= sel('attribute', (string) ($rule['kind'] ?? 'tag')) ?>>атрибут offer</option>
-              </select>
-            </td>
-            <td><input class="input mono" name="map_name[<?= $i ?>]" value="<?= e((string) ($rule['name'] ?? '')) ?>" placeholder="price"></td>
-            <td>
-              <select class="input" name="map_type[<?= $i ?>]">
-                <?php foreach ($sourceTypeLabels as $key => $label): ?>
-                  <option value="<?= e($key) ?>"<?= sel($key, (string) ($src['type'] ?? 'field')) ?>><?= e($label) ?></option>
-                <?php endforeach; ?>
-              </select>
-            </td>
-            <td><input class="input mono" name="map_ref[<?= $i ?>]" value="<?= e((string) ($src['ref'] ?? '')) ?>" placeholder="price · B · sku · текст"></td>
-            <td><label class="check-inline" style="margin:0"><input type="checkbox" name="map_delete[<?= $i ?>]"> <span class="muted small">удалить</span></label></td>
-          </tr>
+    <div class="card">
+      <h2 class="card__title">Конструктор YML</h2>
+      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Для вложенности выберите родителя; порядок меняется стрелками. Изменения применяются после сохранения. Для полей магазина и корневого элемента используйте источник «Константа».</p>
+      <div class="grid-3">
+        <?php foreach (['root_name'=>'Корневой элемент','shop_name'=>'Блок магазина','offers_name'=>'Список товаров','offer_name'=>'Элемент товара'] as $key=>$label): ?>
+          <label class="field"><span class="field__label"><?= e($label) ?></span><input class="input mono" name="outlets[<?= e($key) ?>]" value="<?= e((string)($settings['outlets_array'][$key] ?? ['root_name'=>'yml_catalog','shop_name'=>'shop','offers_name'=>'offers','offer_name'=>'offer'][$key])) ?>"></label>
         <?php endforeach; ?>
-        </tbody>
-      </table>
-      <div class="form__actions" style="padding:0 18px 18px">
-        <button class="btn btn--ghost" name="add_row" value="tag">+ Добавить тег</button>
-        <button class="btn btn--ghost" name="add_row" value="attribute">+ Добавить атрибут offer</button>
       </div>
+      <?php $xmlNodes=$settings['offer_mapping_array']; ?>
+      <div class="table-wrap"><table class="table table--compact xml-tree" id="xml-tree">
+        <thead><tr><th>Вкл.</th><th>Элемент / повторение</th><th>Имя в XML</th><th>Родитель</th><th>Источник / поле</th><th>Порядок</th></tr></thead>
+        <tbody>
+          <?php foreach ($xmlNodes as $i=>$node) { require APP_ROOT.'/app/Views/admin/xml_node.php'; } ?>
+        </tbody>
+      </table></div>
+      <div class="form__actions">
+        <button type="button" class="btn btn--ghost" data-xml-add="tag">+ Добавить тег</button>
+        <button type="button" class="btn btn--ghost" data-xml-add="attribute">+ Добавить атрибут</button>
+        <button type="button" class="btn btn--ghost" data-xml-add="block">+ Вложенный блок</button>
+      </div>
+      <p class="field__hint">Артикул: «Поле файла → sku». Остаток с витрины с учётом соответствий: «Остаток с соответствиями → stock» внутри блока «Для каждого склада». Название склада: «Склад → name».</p>
+      <p class="field__hint">Поля витрины: price, promo_price, effective_price (промоцена, иначе обычная), name, sku, stock_text. Поля файла: sku, name, price, oldprice, min_price. Столбец файла: A, B, AA.</p>
+      <template id="xml-node-template"><?php $i='__INDEX__'; $node=['key'=>'__KEY__','kind'=>'tag','name'=>'new_tag','parent'=>'offer','enabled'=>true,'repeat'=>'once','source'=>['type'=>'constant','ref'=>'']]; require APP_ROOT.'/app/Views/admin/xml_node.php'; ?></template>
     </div>
 
     <div class="card">
-      <h2 class="card__title">Остатки по складам (outlets)</h2>
-      <label class="check-inline"><input type="checkbox" name="outlets[enabled]"<?= chk(!empty($settings['outlets_array']['enabled'])) ?>> Включать блок остатков по складам</label>
-      <div class="grid-3">
-        <label class="field"><span class="field__label">Родительский тег</span>
-          <input class="input mono" name="outlets[parent]" value="<?= e((string) ($settings['outlets_array']['parent'] ?? 'outlets')) ?>"></label>
-        <label class="field"><span class="field__label">Тег склада</span>
-          <input class="input mono" name="outlets[tag]" value="<?= e((string) ($settings['outlets_array']['tag'] ?? 'outlet')) ?>"></label>
-        <label class="field"><span class="field__label">Атрибут остатка</span>
-          <input class="input mono" name="outlets[stock_attr]" value="<?= e((string) ($settings['outlets_array']['stock_attr'] ?? 'instock')) ?>"></label>
-        <label class="field"><span class="field__label">Атрибут имени склада</span>
-          <input class="input mono" name="outlets[name_attr]" value="<?= e((string) ($settings['outlets_array']['name_attr'] ?? 'warehouse_name')) ?>"></label>
-        <label class="field field--narrow"><span class="field__label">Валюта фида</span>
-          <input class="input" name="currency" value="<?= e((string) $settings['currency']) ?>"></label>
-      </div>
+      <h2 class="card__title">Остатки для выгрузки</h2>
+      <p>Основной источник — <b>витрина, сопоставленный товар</b>. Число передаётся напрямую; текстовый остаток — по таблице соответствий ниже.</p>
+      <p class="muted small">Если остаток витрины не определён: остаток из файла склада → соответствия текста файла → запасное значение. Виртуальные склады используют постоянный остаток из своих настроек.</p>
+      <p class="muted small">Склады выбираются для каждой ссылки во вкладке «Готовый фид». Блок «Для каждого склада» повторяется для этих складов.</p>
+      <label class="field field--narrow"><span class="field__label">Валюта фида (пусто — без блока currencies)</span><input class="input" name="currency" value="<?= e((string)$settings['currency']) ?>"></label>
     </div>
 
     <div class="card table-wrap">
@@ -1204,9 +1148,16 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <label class="check-inline"><input type="checkbox" name="oldprice_only_higher"<?= chk((int) $settings['oldprice_only_higher'] === 1) ?>> oldprice выводить, только если больше price</label>
       <div class="form__actions">
         <button class="btn btn--primary">Сохранить настройки</button>
+        <button class="btn btn--ghost" name="check_xml" value="1">Сохранить и проверить YML</button>
       </div>
     </div>
   </form>
+
+  <div class="card">
+    <h2 class="card__title">Предпросмотр сохранённого XML</h2>
+    <p class="card__hint">Первые строки основного фида. Чтобы увидеть изменения, сохраните настройки. Для остальных ссылок используйте вкладку «Готовый фид».</p>
+    <?php if ($feedPreview !== ''): ?><pre class="feed-preview"><?= e($feedPreview) ?></pre><?php else: ?><p class="muted">Сохраните настройки и загрузите сопоставленные товары для предпросмотра.</p><?php endif; ?>
+  </div>
 
 <?php else: ?>
   <!-- ================= Готовый фид ================= -->

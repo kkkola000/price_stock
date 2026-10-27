@@ -1,0 +1,67 @@
+<?php
+declare(strict_types=1);
+require dirname(__DIR__) . '/app/bootstrap.php';
+use App\Support\Db;
+use App\YmlExport\{XmlMapping,SettingsRepository,StockMapRepository,WarehouseRepository,FeedBuilder};
+function ensureXml(bool $ok,string $message):void {if(!$ok)throw new RuntimeException($message);}
+function invalidXml(array $nodes):void {try {XmlMapping::validate($nodes);}catch(InvalidArgumentException){return;}throw new RuntimeException('Invalid tree accepted');}
+$settings=SettingsRepository::get();
+$nodes=$settings['offer_mapping_array'];XmlMapping::validate($nodes);
+$legacy=[['kind'=>'attribute','name'=>'id','enabled'=>true,'source'=>['type'=>'field','ref'=>'sku']],['kind'=>'tag','name'=>'price','enabled'=>true,'source'=>['type'=>'catalog','ref'=>'price']]];
+$outlets=['enabled'=>true,'parent'=>'outlets','tag'=>'outlet','stock_attr'=>'instock','name_attr'=>'warehouse_name'];
+$tree=XmlMapping::upgrade($legacy,$outlets);XmlMapping::validate($tree);
+ensureXml(XmlMapping::upgrade($tree,$outlets)===$tree,'Upgrade must not duplicate warehouse blocks');
+$bad=$tree;$bad[0]['name']='bad<name';invalidXml($bad);
+$bad=$tree;$bad[2]['parent']='stock_row';invalidXml($bad);
+$bad=$tree;$bad[]=$tree[0];$bad[count($bad)-1]['key']='duplicate_id';invalidXml($bad);
+$pdo=Db::pdo();$pdo->beginTransaction();$paths=[];
+try {
+    $source=App\Models\SourceRepository::create(['name'=>'XML test','type'=>'csv','fetch_method'=>'upload','mapping'=>[]]);
+    Db::run('INSERT INTO products(source_id,sku,name,price,stock_text,stock_qty) VALUES (?,?,?,?,?,NULL)',[$source,'CATALOG-SKU','XML <& product',9760,'Более 5']);$product=Db::lastInsertId();
+    $warehouseIds=[];
+    foreach([7,13] as $i=>$stock) {
+        $wh=WarehouseRepository::create('склад '.($i+1),'test',$i);$warehouseIds[]=$wh;
+        Db::run('INSERT INTO yx_items(upload_id,warehouse_id,sku,name,stock_qty,price,oldprice,min_price,extra,import_batch) VALUES (?,?,?,?,?,?,?,?,?,?)',[0,$wh,'FILE-SKU','File name',$stock,9760,10736,8000,json_encode(['A'=>'raw<&']), 'test']);
+        Db::run("INSERT INTO yx_matches(warehouse_id,item_sku,product_id,status) VALUES (?,?,?,'confirmed')",[$wh,'FILE-SKU',$product]);
+    }
+    $virtual=WarehouseRepository::create('Виртуальный','virtual',2,'virtual',3);$warehouseIds[]=$virtual;
+    StockMapRepository::replaceAll([['pattern'=>'Более 5','qty'=>10]]);
+    $save=static function(array $mapping,array $envelope=[]) use($settings,$outlets):void {
+        SettingsRepository::save('','','','',$mapping,array_merge($outlets,$envelope),true,false,true,2);
+    };
+    $build=static function()use($warehouseIds,&$paths):SimpleXMLElement {
+        $result=FeedBuilder::buildFeed(['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds]);$paths[]=$result['path'];
+        $xml=simplexml_load_file($result['path']);ensureXml($xml!==false,'Generated XML parses');return $xml;
+    };
+    $save($legacy);$xml=$build();$offer=$xml->shop->offers->offer;
+    ensureXml((string)$offer['id']==='FILE-SKU','ID comes from warehouse file');
+    ensureXml((string)$offer->price==='9760','Price from catalog');
+    ensureXml(count($offer->outlets->outlet)===3,'Two real warehouses and virtual');
+    ensureXml((string)$offer->outlets->outlet[0]['instock']==='10'&&(string)$offer->outlets->outlet[1]['instock']==='10','Catalog text mapping: Более 5 -> 10');
+    ensureXml((string)$offer->outlets->outlet[2]['instock']==='3','Virtual stock constant');
+    $tree[]=['key'=>'custom','parent'=>'offer','kind'=>'block','name'=>'custom','enabled'=>true,'repeat'=>'once'];
+    $tree[]=['key'=>'text','parent'=>'custom','kind'=>'tag','name'=>'label','enabled'=>true,'source'=>['type'=>'constant','ref'=>'Text <& " escaped']];
+    $tree[]=['key'=>'attr','parent'=>'custom','kind'=>'attribute','name'=>'code','enabled'=>true,'source'=>['type'=>'column','ref'=>'A']];
+    $tree[]=['key'=>'old','parent'=>'offer','kind'=>'tag','name'=>'oldprice','enabled'=>true,'source'=>['type'=>'field','ref'=>'oldprice']];
+    $tree[]=['key'=>'shop_custom','parent'=>'_shop','kind'=>'tag','name'=>'custom_shop','enabled'=>true,'source'=>['type'=>'constant','ref'=>'shop value']];
+    $tree[]=['key'=>'root_custom','parent'=>'_catalog','kind'=>'attribute','name'=>'version','enabled'=>true,'source'=>['type'=>'constant','ref'=>'2']];
+    XmlMapping::validate($tree);$save($tree,['root_name'=>'catalog','shop_name'=>'store','offers_name'=>'items','offer_name'=>'item']);$xml=$build();
+    $offer=$xml->store->items->item;
+    ensureXml((string)$xml['version']==='2'&&(string)$xml->store->custom_shop==='shop value','Custom root attributes and shop tags');
+    ensureXml($xml->getName()==='catalog'&&(string)$offer->custom['code']==='raw<&','Custom root, nesting and attributes');
+    ensureXml((string)$offer->custom->label==='Text <& " escaped','XML escaping');
+    ensureXml((string)$offer->oldprice==='10736','oldprice rule');
+    Db::run('UPDATE products SET stock_qty=0 WHERE id=?',[$product]);$xml=$build();ensureXml((string)$xml->store->items->item->outlets->outlet[0]['instock']==='0','Zero catalog stock must not fall back');
+    Db::run('UPDATE products SET stock_qty=NULL,stock_text=? WHERE id=?',['Unknown',$product]);$xml=$build();ensureXml((string)$xml->store->items->item->outlets->outlet[0]['instock']==='7','File stock fallback');
+    Db::run('UPDATE yx_items SET stock_qty=NULL,stock_text=? WHERE warehouse_id=?',['Unknown',$warehouseIds[0]]);$xml=$build();ensureXml((string)$xml->store->items->item->outlets->outlet[0]['instock']==='2','Final stock fallback');
+    $stableFeed=['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds];
+    $stable=FeedBuilder::buildFeed($stableFeed);$paths[]=$stable['path'];$before=file_get_contents($stable['path']);
+    foreach($tree as &$node) if($node['key']==='text') $node['source']['ref']="\x01";
+    unset($node);$save($tree);
+    $rejected=false;
+    try {FeedBuilder::buildFeed($stableFeed);}catch(RuntimeException){$rejected=true;}
+    ensureXml($rejected&&file_get_contents($stable['path'])===$before,'Invalid XML must preserve previous cached feed');
+    echo "PASS: legacy upgrade, validation, source SKU, catalog stock mapping, virtual warehouses, nesting, attributes, escaping, custom envelope, fallback chain\n";
+} finally {
+    $pdo->rollBack();foreach($paths as $path) if(is_file($path))unlink($path);
+}

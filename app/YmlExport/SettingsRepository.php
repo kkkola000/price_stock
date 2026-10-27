@@ -65,7 +65,7 @@ final class SettingsRepository
                 json_encode(self::DEFAULT_OFFER_MAPPING, JSON_UNESCAPED_UNICODE),
             ]);
         }
-        $row['offer_mapping_array'] = $mapping;
+        $row['offer_mapping_array'] = XmlMapping::upgrade($mapping, json_decode((string) $row['outlets'], true) ?: self::DEFAULT_OUTLETS);
         $row['outlets_array'] = json_decode((string) $row['outlets'], true) ?: self::DEFAULT_OUTLETS;
 
         return $row;

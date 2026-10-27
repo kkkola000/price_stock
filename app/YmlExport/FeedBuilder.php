@@ -46,7 +46,11 @@ final class FeedBuilder
     {
         $settings = SettingsRepository::get();
         $mapping = $settings['offer_mapping_array'];
+        XmlMapping::validate($mapping);
         $outlets = $settings['outlets_array'];
+        foreach (['root_name','shop_name','offers_name','offer_name'] as $name) {
+            if (isset($outlets[$name]) && !preg_match('/^[A-Za-z_][A-Za-z0-9_.-]*$/', $outlets[$name])) throw new RuntimeException('Некорректное имя XML.');
+        }
         $onlyConfirmed = (int) $settings['only_confirmed'] === 1;
         $stockMap = StockMapRepository::map();
         $stockFallback = (int) ($settings['stock_fallback'] ?? 0);
@@ -94,9 +98,13 @@ final class FeedBuilder
         $xml = new XMLWriter();
         $xml->openURI($temp);
         $xml->startDocument('1.0', 'UTF-8');
-        $xml->startElement('yml_catalog');
-        $xml->writeAttribute('date', date('Y-m-d H:i'));
-        $xml->startElement('shop');
+        $xml->startElement((string) ($outlets['root_name'] ?? 'yml_catalog'));
+        $rootDate = array_filter($mapping, static fn($node)=>!empty($node['enabled'])&&$node['parent']==='_catalog'&&$node['kind']==='attribute'&&$node['name']==='date');
+        if ($rootDate===[]) $xml->writeAttribute('date', date('Y-m-d H:i'));
+        $constant = static fn(array $source, ?array $warehouse): string => (string)($source['ref']??'');
+        XmlMapping::write($xml,$mapping,$constant,[],'_catalog');
+        $xml->startElement((string) ($outlets['shop_name'] ?? 'shop'));
+        XmlMapping::write($xml,$mapping,$constant,[],'_shop');
 
         if ($settings['shop_name'] !== '') {
             $xml->writeElement('name', (string) $settings['shop_name']);
@@ -116,7 +124,8 @@ final class FeedBuilder
             $xml->endElement(); // currencies
         }
 
-        $xml->startElement('offers');
+        $xml->startElement((string) ($outlets['offers_name'] ?? 'offers'));
+        XmlMapping::write($xml,$mapping,$constant,[],'_offers');
 
         $offers = 0;
         $productCache = [];
@@ -133,7 +142,28 @@ final class FeedBuilder
         $xml->endDocument();
         $xml->flush();
 
-        rename($temp, $file);
+        // Validate the complete document before replacing the last working cache.
+        $previousErrors = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        $reader = new \XMLReader();
+        try {
+            if (!$reader->open($temp, null, LIBXML_NONET)) throw new RuntimeException('Не удалось проверить XML.');
+            while ($reader->read()) {}
+            foreach (libxml_get_errors() as $error) {
+                if ($error->level >= LIBXML_ERR_ERROR) throw new RuntimeException('Некорректный XML: ' . trim($error->message));
+            }
+        } catch (\Throwable $exception) {
+            @unlink($temp);
+            throw $exception;
+        } finally {
+            $reader->close();
+            libxml_clear_errors();
+            libxml_use_internal_errors($previousErrors);
+        }
+        if (!rename($temp, $file)) {
+            @unlink($temp);
+            throw new RuntimeException('Не удалось сохранить готовый XML.');
+        }
 
         FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
 
@@ -219,63 +249,22 @@ final class FeedBuilder
             return false;
         }
 
-        $values = [];
-        foreach ($mapping as $rule) {
-            if (empty($rule['enabled']) || trim((string) ($rule['name'] ?? '')) === '') {
-                continue;
-            }
-            $values[] = [
-                'kind'  => (string) ($rule['kind'] ?? 'tag'),
-                'name'  => trim((string) $rule['name']),
-                'value' => self::resolveSource($rule['source'] ?? [], $primary, $group, $totalStock, $productCache),
-            ];
+        $warehouseContexts = $group;
+        foreach ($virtualWarehouses as $warehouse) {
+            $warehouseContexts[] = ['resolved_qty'=>max(0,(int)$warehouse['default_stock']), 'warehouse_name'=>$warehouse['name'], 'warehouse_id'=>$warehouse['id']];
         }
-
-        // oldprice выводим только если он больше price — когда включено в настройках.
-        if ((int) $settings['oldprice_only_higher'] === 1) {
-            $price = self::numericTag($values, 'price');
-            $old = self::numericTag($values, 'oldprice');
-            if ($price !== null && $old !== null && $old <= $price) {
-                $values = array_values(array_filter(
-                    $values,
-                    static fn (array $v): bool => !($v['kind'] === 'tag' && $v['name'] === 'oldprice')
-                ));
+        $resolve = static function(array $source, ?array $warehouse) use ($primary,$group,$totalStock,&$productCache): string {
+            if (($source['type'] ?? '') === 'resolved') {
+                return (string) (($source['ref'] ?? '') === 'total_stock' ? $totalStock : ($warehouse['resolved_qty'] ?? 0));
             }
-        }
-
-        $xml->startElement('offer');
-        foreach ($values as $v) {
-            if ($v['kind'] === 'attribute') {
-                if ($v['value'] !== '') {
-                    $xml->writeAttribute($v['name'], $v['value']);
-                }
-            }
-        }
-        foreach ($values as $v) {
-            if ($v['kind'] !== 'attribute' && $v['value'] !== '') {
-                $xml->writeElement($v['name'], $v['value']);
-            }
-        }
-
-        if (!empty($outlets['enabled'])) {
-            $xml->startElement((string) ($outlets['parent'] ?? 'outlets'));
-            foreach ($group as $row) {
-                $xml->startElement((string) ($outlets['tag'] ?? 'outlet'));
-                $xml->writeAttribute((string) ($outlets['stock_attr'] ?? 'instock'), (string) max(0, (int) ($row['resolved_qty'] ?? 0)));
-                $xml->writeAttribute((string) ($outlets['name_attr'] ?? 'warehouse_name'), (string) $row['warehouse_name']);
-                $xml->endElement();
-            }
-            // Виртуальные склады — у каждого оффера с постоянным остатком.
-            foreach ($virtualWarehouses as $vw) {
-                $xml->startElement((string) ($outlets['tag'] ?? 'outlet'));
-                $xml->writeAttribute((string) ($outlets['stock_attr'] ?? 'instock'), (string) max(0, (int) ($vw['default_stock'] ?? 0)));
-                $xml->writeAttribute((string) ($outlets['name_attr'] ?? 'warehouse_name'), (string) $vw['name']);
-                $xml->endElement();
-            }
-            $xml->endElement(); // outlets
-        }
-
-        $xml->endElement(); // offer
+            if (($source['type'] ?? '') === 'warehouse') return (string) ($warehouse['warehouse_name'] ?? '');
+            if ($warehouse !== null && ($source['type'] ?? '') === 'field' && ($source['ref'] ?? '') === 'stock') return (string) ($warehouse['resolved_qty'] ?? 0);
+            $context = $warehouse !== null && in_array($source['type'] ?? '', ['field','column'], true) ? $warehouse : $primary;
+            return self::resolveSource($source, $context, $group, $totalStock, $productCache);
+        };
+        $xml->startElement((string) ($outlets['offer_name'] ?? 'offer'));
+        XmlMapping::write($xml, $mapping, $resolve, $warehouseContexts, 'offer', null, (int)$settings['oldprice_only_higher']===1);
+        $xml->endElement();
 
         return true;
     }
@@ -331,10 +320,11 @@ final class FeedBuilder
                 if ($product === null) {
                     return $ref === 'sku' ? (string) ($primary['product_sku'] ?? '') : '';
                 }
-                if ($ref === 'price') {
-                    $formatted = self::formatNumber($product['price'] ?? null);
-                    if ($formatted === '' && is_numeric(trim((string) ($product['price_text'] ?? '')))) {
-                        $formatted = self::formatNumber(trim((string) $product['price_text']));
+                if (in_array($ref, ['price','promo_price','effective_price'], true)) {
+                    $field = $ref === 'effective_price' ? ((float)($product['promo_price'] ?? 0)>0 ? 'promo_price' : 'price') : $ref;
+                    $formatted = self::formatNumber($product[$field] ?? null);
+                    if ($formatted === '' && is_numeric(trim((string) ($product[$field . '_text'] ?? '')))) {
+                        $formatted = self::formatNumber(trim((string) $product[$field . '_text']));
                     }
 
                     return $formatted;
@@ -365,7 +355,7 @@ final class FeedBuilder
         }
         if (!array_key_exists($id, $cache)) {
             $cache[$id] = Db::first(
-                'SELECT id, sku, name, price, price_text, stock_qty, stock_text FROM products WHERE id = ?',
+                'SELECT id, sku, name, price, price_text, promo_price, promo_price_text, stock_qty, stock_text FROM products WHERE id = ?',
                 [$id]
             );
         }
