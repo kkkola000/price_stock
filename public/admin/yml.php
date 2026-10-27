@@ -408,6 +408,31 @@ function handleSettingsSave(): void
     $template=['text'=>(string)($_POST['xml_template']??''),'variables'=>$variables];
     try {XmlTemplate::compile($template['text'],$variables);}catch(Throwable $exception){$errors[]=$exception->getMessage();}
     $outlets['template']=$template;
+    $numericEnabled=isset($_POST['numeric_stock_enabled']);
+    $numericThreshold=trim((string)($_POST['numeric_stock_threshold']??'5'));
+    $numericValue=trim((string)($_POST['numeric_stock_value']??'10'));
+    foreach([$numericThreshold,$numericValue] as $number) {
+        if($numericEnabled&&(!preg_match('/^[0-9]+$/',$number)||(float)$number>2147483647)) {
+            $errors[]='Порог и число замены должны быть целыми числами от 0 до 2147483647.';
+            break;
+        }
+    }
+    $outlets['numeric_stock_rule']=['enabled'=>$numericEnabled,'threshold'=>$numericThreshold,'value'=>$numericValue];
+    $lowerEnabled=isset($_POST['numeric_stock_lower_enabled']);
+    $lowerThreshold=trim((string)($_POST['numeric_stock_lower_threshold']??'4'));
+    $lowerValue=trim((string)($_POST['numeric_stock_lower_value']??'0'));
+    foreach([$lowerThreshold,$lowerValue] as $number) {
+        if($lowerEnabled&&(!preg_match('/^[0-9]+$/',$number)||(float)$number>2147483647)) {
+            $errors[]='Порог и число замены должны быть целыми числами от 0 до 2147483647.';
+            break;
+        }
+    }
+    if($numericEnabled&&$lowerEnabled&&(float)$lowerThreshold>=(float)$numericThreshold) {
+        $errors[]='Диапазоны пересекаются: порог «≤» должен быть меньше порога «≥».';
+    }
+    $outlets['numeric_stock_rule']+=['lower_enabled'=>$lowerEnabled,'lower_threshold'=>$lowerThreshold,'lower_value'=>$lowerValue];
+
+
     $draft = array_merge($settings, [
         'shop_name'=>trim((string)($_POST['shop_name']??'')),
         'shop_company'=>trim((string)($_POST['shop_company']??'')),
@@ -470,6 +495,10 @@ function handleSettingsSave(): void
         flash('success','Шаблон корректен. Предпросмотр обновлён; настройки и действующие фиды не изменены.');
         redirect('yml.php?tab=settings');
     }
+    $outlets['numeric_stock_rule']['threshold']=max(0,(int)$numericThreshold);
+    $outlets['numeric_stock_rule']['value']=max(0,(int)$numericValue);
+    $outlets['numeric_stock_rule']['lower_threshold']=max(0,(int)$lowerThreshold);
+    $outlets['numeric_stock_rule']['lower_value']=max(0,(int)$lowerValue);
     $pdo=Db::pdo();
     $pdo->beginTransaction();
     try {
@@ -1105,6 +1134,20 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <p>Основной источник — <b>витрина, сопоставленный товар</b>. Число передаётся напрямую; текстовый остаток — по таблице соответствий ниже.</p>
       <p class="muted small">Если остаток витрины не определён: остаток из файла склада → соответствия текста файла → запасное значение. Виртуальные склады используют постоянный остаток из своих настроек.</p>
       <p class="muted small">Склады выбираются для каждой ссылки во вкладке «Готовый фид». Блок «Для каждого склада» повторяется для этих складов.</p>
+      <?php $numericRule=(array)($settings['outlets_array']['numeric_stock_rule']??[]); ?>
+      <h3 class="a-subtitle">Правило для числового остатка с витрины</h3>
+      <label class="check-inline"><input type="checkbox" name="numeric_stock_enabled"<?= chk(!empty($numericRule['enabled'])) ?>> Заменять числовой остаток по порогу</label>
+      <div class="grid-2">
+        <label class="field"><span class="field__label">Если остаток ≥</span><input class="input" type="number" min="0" max="2147483647" step="1" name="numeric_stock_threshold" value="<?= e((string)($numericRule['threshold']??5)) ?>"></label>
+        <label class="field"><span class="field__label">Передавать в YML</span><input class="input" type="number" min="0" max="2147483647" step="1" name="numeric_stock_value" value="<?= e((string)($numericRule['value']??10)) ?>"></label>
+      </div>
+      <label class="check-inline"><input type="checkbox" name="numeric_stock_lower_enabled"<?= chk(!empty($numericRule['lower_enabled'])) ?>> Заменять малый числовой остаток</label>
+      <div class="grid-2">
+        <label class="field"><span class="field__label">Если остаток ≤</span><input class="input" type="number" min="0" max="2147483647" step="1" name="numeric_stock_lower_threshold" value="<?= e((string)($numericRule['lower_threshold']??4)) ?>"></label>
+        <label class="field"><span class="field__label">Передавать в YML</span><input class="input" type="number" min="0" max="2147483647" step="1" name="numeric_stock_lower_value" value="<?= e((string)($numericRule['lower_value']??0)) ?>"></label>
+      </div>
+      <p class="field__hint">Например: остаток ≥ 5 → передавать 10, остаток ≤ 4 → передавать 0. Диапазоны не должны пересекаться. Значения между диапазонами передаются как есть. Остаток на витрине не меняется; текстовые соответствия, файл склада и виртуальные склады обрабатываются отдельно. Замена применяется до фильтра нулевых остатков.</p>
+
 
     </div>
 

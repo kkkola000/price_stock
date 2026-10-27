@@ -51,6 +51,44 @@ try {
     ensureXml(count($offer->outlets->outlet)===3,'Two real warehouses and virtual');
     ensureXml((string)$offer->outlets->outlet[0]['instock']==='10'&&(string)$offer->outlets->outlet[1]['instock']==='10','Catalog text mapping: Более 5 -> 10');
     ensureXml((string)$offer->outlets->outlet[2]['instock']==='3','Virtual stock constant');
+    $numericMapping=$converted;
+    $numericMapping[]=['key'=>'raw_numeric','parent'=>'offer','kind'=>'tag','name'=>'raw_quantity','enabled'=>true,'source'=>['type'=>'catalog','ref'=>'stock']];
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>true,'threshold'=>5,'value'=>10]]);
+    foreach([0=>0,4=>4,5=>10,6=>10,100=>10] as $input=>$expected) {
+        Db::run('UPDATE products SET stock_qty=? WHERE id=?',[$input,$product]);
+        $numericXml=$build();$numericOffer=$numericXml->shop->offers->offer;
+        ensureXml((string)$numericOffer->quantity===(string)$expected,'Numeric boundary >= threshold');
+        ensureXml((string)$numericOffer->raw_quantity===(string)$expected,'Numeric catalog source uses rule');
+        ensureXml((string)$numericOffer->outlets->outlet[0]['instock']===(string)$expected,'Warehouse outlet uses numeric rule');
+        ensureXml((int)Db::scalar('SELECT stock_qty FROM products WHERE id=?',[$product])===$input,'Catalog stock is not modified');
+    }
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>true,'threshold'=>5,'value'=>10,'lower_enabled'=>true,'lower_threshold'=>4,'lower_value'=>0]]);
+    foreach([0=>0,3=>0,4=>0,5=>10,6=>10] as $input=>$expected) {
+        Db::run('UPDATE products SET stock_qty=? WHERE id=?',[$input,$product]);
+        $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity===(string)$expected,'Both >= and <= inclusive boundaries');
+    }
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>true,'threshold'=>5,'value'=>10,'lower_enabled'=>true,'lower_threshold'=>2,'lower_value'=>0]]);
+    Db::run('UPDATE products SET stock_qty=3 WHERE id=?',[$product]);
+    $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity==='3','Gap between thresholds is unchanged');
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>false,'lower_enabled'=>true,'lower_threshold'=>4,'lower_value'=>0]]);
+    Db::run('UPDATE products SET stock_qty=4 WHERE id=?',[$product]);
+    $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity==='0','Lower rule works independently');
+    Db::run('UPDATE products SET stock_qty=100 WHERE id=?',[$product]);
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>false,'threshold'=>5,'value'=>10]]);
+    $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity==='100','Disabled numeric rule');
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>true,'threshold'=>3,'value'=>2]]);
+    Db::run('UPDATE products SET stock_qty=NULL WHERE id=?',[$product]);
+    $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity==='10','Text map result is not thresholded');
+    ensureXml((string)$numericXml->shop->offers->offer->outlets->outlet[2]['instock']==='3','Virtual stock is not thresholded');
+    Db::run('UPDATE products SET stock_text=? WHERE id=?',['Unknown',$product]);
+    $numericXml=$build();ensureXml((string)$numericXml->shop->offers->offer->quantity==='7','File fallback stock is not thresholded');
+    Db::run('UPDATE products SET stock_qty=5 WHERE id=?',[$product]);
+    $save($numericMapping,['numeric_stock_rule'=>['enabled'=>true,'threshold'=>5,'value'=>0]]);
+    $numericSettings=SettingsRepository::get();$numericSettings['skip_zero_stock']=1;
+    $zero=FeedBuilder::buildFeed(['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds],$numericSettings,null,true);$paths[]=$zero['path'];
+    ensureXml($zero['offers']===0,'Numeric replacement runs before zero-stock filter');
+    Db::run('UPDATE products SET stock_qty=NULL,stock_text=? WHERE id=?',['Более 5',$product]);
+    $save($converted);
     $convertedTemplate=\App\YmlExport\XmlTemplate::fromSettings(SettingsRepository::get());
     \App\YmlExport\XmlTemplate::compile($convertedTemplate['text'],$convertedTemplate['variables']);
     $settingsBefore=SettingsRepository::get();

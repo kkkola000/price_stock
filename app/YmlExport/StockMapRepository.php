@@ -96,6 +96,19 @@ final class StockMapRepository
         return $matched ?? max(0, $fallback);
     }
 
+    /** Numeric catalog stock only; text mappings and warehouse-file values bypass this rule. */
+    public static function catalogQuantity(int $quantity, array $rule): int
+    {
+        $quantity=max(0,$quantity);
+        if(!empty($rule['enabled'])&&$quantity>=max(0,(int)($rule['threshold']??0))) {
+            return max(0,(int)($rule['value']??0));
+        }
+        if(!empty($rule['lower_enabled'])&&$quantity<=max(0,(int)($rule['lower_threshold']??0))) {
+            return max(0,(int)($rule['lower_value']??0));
+        }
+        return $quantity;
+    }
+
     private static function normalize(string $value): string
     {
         $value = mb_strtolower($value, 'UTF-8');

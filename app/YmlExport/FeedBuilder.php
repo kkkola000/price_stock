@@ -261,13 +261,14 @@ final class FeedBuilder
         // число как есть, текст («Более 5») — через соответствия администратора.
         // Если в каталоге остатка нет — используется значение из файла.
         $catalogQty = null;
+        $numericRule=(array)($settings['outlets_array']['numeric_stock_rule']??[]);
         $product = self::product(
             $primary['product_id'] !== null ? (int) $primary['product_id'] : null,
             $productCache
         );
         if ($product !== null) {
             if ($product['stock_qty'] !== null) {
-                $catalogQty = max(0, (int) $product['stock_qty']);
+                $catalogQty = StockMapRepository::catalogQuantity((int)$product['stock_qty'],$numericRule);
             } else {
                 $catalogQty = StockMapRepository::match(
                     $product['stock_text'] !== null ? (string) $product['stock_text'] : null,
@@ -299,14 +300,14 @@ final class FeedBuilder
         foreach ($virtualWarehouses as $warehouse) {
             $warehouseContexts[] = ['resolved_qty'=>max(0,(int)$warehouse['default_stock']), 'warehouse_name'=>$warehouse['name'], 'warehouse_id'=>$warehouse['id']];
         }
-        $resolve = static function(array $source, ?array $warehouse) use ($primary,$group,$totalStock,&$productCache): string {
+        $resolve = static function(array $source, ?array $warehouse) use ($primary,$group,$totalStock,&$productCache,$numericRule): string {
             if (($source['type'] ?? '') === 'resolved') {
                 return (string) (($source['ref'] ?? '') === 'total_stock' ? $totalStock : ($warehouse['resolved_qty'] ?? $group[0]['resolved_qty'] ?? 0));
             }
             if (($source['type'] ?? '') === 'warehouse') return (string) ($warehouse['warehouse_name'] ?? $primary['warehouse_name'] ?? '');
             if ($warehouse !== null && ($source['type'] ?? '') === 'field' && ($source['ref'] ?? '') === 'stock') return (string) ($warehouse['resolved_qty'] ?? $group[0]['resolved_qty'] ?? 0);
             $context = $warehouse !== null && in_array($source['type'] ?? '', ['field','column'], true) ? $warehouse : $primary;
-            return self::resolveSource($source, $context, $group, $totalStock, $productCache);
+            return self::resolveSource($source, $context, $group, $totalStock, $productCache, $numericRule);
         };
         if ($consume!==null) { $consume($resolve,$warehouseContexts); return true; }
         $xml->startElement((string) ($outlets['offer_name'] ?? 'offer'));
@@ -328,7 +329,7 @@ final class FeedBuilder
      * @param list<array<string,mixed>> $group
      * @param array<int,array<string,mixed>|null> $productCache
      */
-    private static function resolveSource(array $source, array $primary, array $group, int $totalStock, array &$productCache): string
+    private static function resolveSource(array $source, array $primary, array $group, int $totalStock, array &$productCache, array $numericRule=[]): string
     {
         $type = (string) ($source['type'] ?? '');
         $ref = (string) ($source['ref'] ?? '');
@@ -378,7 +379,7 @@ final class FeedBuilder
                     return $formatted;
                 }
                 if ($ref === 'stock') {
-                    return $product['stock_qty'] !== null ? (string) max(0, (int) $product['stock_qty']) : '';
+                    return $product['stock_qty'] !== null ? (string)StockMapRepository::catalogQuantity((int)$product['stock_qty'],$numericRule) : '';
                 }
 
                 return (string) ($product[$ref] ?? '');
