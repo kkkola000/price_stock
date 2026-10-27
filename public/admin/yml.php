@@ -78,26 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     switch ($action) {
         case 'warehouse-save':
-            $id = (int) ($_POST['id'] ?? 0);
-            $name = trim((string) ($_POST['name'] ?? ''));
-            if ($name === '') {
-                flash('error', 'Укажите название склада.');
-                redirect('yml.php?tab=warehouses');
-            }
-            $code = trim((string) ($_POST['code'] ?? ''));
-            $sort = (int) ($_POST['sort'] ?? 0);
-            $kind = (string) ($_POST['kind'] ?? 'file') === 'virtual' ? 'virtual' : 'file';
-            $defaultStock = max(0, (int) ($_POST['default_stock'] ?? 0));
-            if ($id > 0) {
-                WarehouseRepository::update($id, $name, $code, $sort, $kind, $defaultStock);
-                flash('success', 'Склад сохранён.');
-            } else {
-                WarehouseRepository::create($name, $code, $sort, $kind, $defaultStock);
-                flash('success', $kind === 'virtual'
-                    ? 'Виртуальный склад создан: его остаток попадёт в каждый оффер фида.'
-                    : 'Склад создан. Теперь загрузите его файл остатков.');
-            }
-            redirect('yml.php?tab=warehouses');
+            handleUploadSave(true);
             break;
 
         case 'warehouse-toggle':
@@ -229,13 +210,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 /* ---------- Обработчики ---------- */
 
-function handleUploadSave(): void
+function handleUploadSave(bool $combined = false): void
 {
-    $warehouseId = (int) ($_POST['warehouse_id'] ?? 0);
-    $warehouse = WarehouseRepository::find($warehouseId);
-    if ($warehouse === null) {
-        flash('error', 'Выберите склад.');
+    $warehouseId = (int) ($_POST[$combined ? 'id' : 'warehouse_id'] ?? 0);
+    $warehouse = $warehouseId > 0 ? WarehouseRepository::find($warehouseId) : null;
+    if ((!$combined || $warehouseId > 0) && $warehouse === null) {
+        flash('error', 'Склад не найден.');
         redirect('yml.php?tab=warehouses');
+    }
+    $name = trim((string) ($_POST['name'] ?? ''));
+    $code = trim((string) ($_POST['code'] ?? ''));
+    $sort = (int) ($_POST['sort'] ?? 0);
+    $kind = (string) ($_POST['kind'] ?? 'file') === 'virtual' ? 'virtual' : 'file';
+    $defaultStock = max(0, (int) ($_POST['default_stock'] ?? 0));
+    $returnUrl = 'yml.php?tab=warehouses&wh_form=' . ($warehouseId > 0 ? $warehouseId : 'new');
+    if ($combined) {
+        // Restore all entered settings on validation errors, without retaining a file upload.
+        $_SESSION['yml_warehouse_form'] = $_POST;
+        unset($_SESSION['yml_warehouse_form']['csrf_token']);
+        if ($name === '') {
+            flash('error', 'Укажите название склада.');
+            redirect($returnUrl);
+        }
+        if ($kind === 'virtual') {
+            if ($warehouseId > 0) {
+                WarehouseRepository::update($warehouseId, $name, $code, $sort, $kind, $defaultStock);
+            } else {
+                $warehouseId = WarehouseRepository::create($name, $code, $sort, $kind, $defaultStock);
+            }
+            // Keep any existing file and matches when switching to virtual and back.
+            unset($_SESSION['yml_warehouse_form']);
+            rebuildQuiet();
+            flash('success', 'Виртуальный склад сохранён.');
+            redirect('yml.php?tab=warehouses');
+        }
     }
 
     $existing = UploadRepository::findByWarehouse($warehouseId);
@@ -290,7 +298,7 @@ function handleUploadSave(): void
         foreach ($errors as $error) {
             flash('error', $error);
         }
-        redirect('yml.php?tab=warehouses&upload_form=' . $warehouseId);
+        redirect($combined ? $returnUrl : 'yml.php?tab=warehouses&upload_form=' . $warehouseId);
     }
 
     $data = [
@@ -306,22 +314,43 @@ function handleUploadSave(): void
         'mapping'       => $mapping,
     ];
 
-    if ($existing === null) {
-        $data['file_path'] = $uploadedName;
-        $data['original_filename'] = $uploadedName !== null ? (string) $_FILES['price_file']['name'] : null;
-        $id = UploadRepository::create($data);
-    } else {
-        $id = (int) $existing['id'];
-        UploadRepository::update($id, $data);
-        if ($uploadedName !== null) {
-            UploadRepository::setFile($id, $uploadedName, (string) $_FILES['price_file']['name']);
-            if (!empty($existing['file_path'])) {
-                $old = APP_STORAGE . '/uploads/' . basename((string) $existing['file_path']);
-                if (is_file($old)) {
-                    @unlink($old);
-                }
+    $pdo = Db::pdo();
+    $pdo->beginTransaction();
+    try {
+        if ($combined) {
+            if ($warehouseId > 0) {
+                WarehouseRepository::update($warehouseId, $name, $code, $sort, $kind, $defaultStock);
+            } else {
+                $warehouseId = WarehouseRepository::create($name, $code, $sort, $kind, $defaultStock);
+            }
+            $data['warehouse_id'] = $warehouseId;
+        }
+        if ($existing === null) {
+            $data['file_path'] = $uploadedName;
+            $data['original_filename'] = $uploadedName !== null ? (string) $_FILES['price_file']['name'] : null;
+            $id = UploadRepository::create($data);
+        } else {
+            $id = (int) $existing['id'];
+            UploadRepository::update($id, $data);
+            if ($uploadedName !== null) {
+                UploadRepository::setFile($id, $uploadedName, (string) $_FILES['price_file']['name']);
             }
         }
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($uploadedName !== null) @unlink(APP_STORAGE . '/uploads/' . basename($uploadedName));
+        throw $exception;
+    }
+    if ($uploadedName !== null && !empty($existing['file_path'])) {
+        $old = APP_STORAGE . '/uploads/' . basename((string) $existing['file_path']);
+        if (is_file($old)) @unlink($old);
+    }
+    unset($_SESSION['yml_warehouse_form']);
+    if ($combined && !isset($_POST['save_and_import'])) rebuildQuiet();
+
+    if (isset($_POST['save_and_preview'])) {
+        redirect('yml.php?tab=warehouses&wh_form=' . $warehouseId . '&preview=' . $id);
     }
 
     if (isset($_POST['save_and_import'])) {
@@ -337,7 +366,7 @@ function handleUploadSave(): void
         redirect('yml.php?tab=warehouses');
     }
 
-    flash('success', 'Настройки файла склада сохранены.');
+    flash('success', $combined ? 'Склад и настройки файла сохранены.' : 'Настройки файла склада сохранены.');
     redirect('yml.php?tab=warehouses');
 }
 
@@ -506,6 +535,8 @@ $previewUpload = null;
 if ($tab === 'warehouses' && isset($_GET['preview'])) {
     $previewUpload = UploadRepository::find((int) $_GET['preview']);
     if ($previewUpload !== null) {
+        $previewWarehouse = WarehouseRepository::find((int) $previewUpload['warehouse_id']);
+        $previewUpload['warehouse_name'] = (string) ($previewWarehouse['name'] ?? '');
         try {
             $previewRows = UploadImporter::preview($previewUpload);
         } catch (Throwable $exception) {
@@ -516,7 +547,14 @@ if ($tab === 'warehouses' && isset($_GET['preview'])) {
 }
 
 $uploadFormWarehouse = isset($_GET['upload_form']) ? (int) $_GET['upload_form'] : 0;
-$warehouseFormId = isset($_GET['wh_form']) ? (int) $_GET['wh_form'] : null; // 0 = новый
+$warehouseFormId = isset($_GET['wh_form']) ? (int) $_GET['wh_form'] : ($uploadFormWarehouse > 0 ? $uploadFormWarehouse : null);
+$formOld = $_SESSION['yml_warehouse_form'] ?? null;
+unset($_SESSION['yml_warehouse_form']);
+if ($warehouseFormId !== null && $warehouseFormId > 0 && WarehouseRepository::find($warehouseFormId) === null) {
+    $warehouseFormId = null;
+    flash('error', 'Склад не найден.');
+}
+$uploadsByWarehouse = array_column($uploads, null, 'warehouse_id');
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = (string) ($_SERVER['HTTP_HOST'] ?? 'example.com');
@@ -629,14 +667,14 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
   <div class="card table-wrap">
     <table class="table">
       <thead>
-        <tr><th>Склад</th><th>Код</th><th class="num">Позиций</th><th class="num">Сопоставлено</th><th>Статус</th><th></th></tr>
+        <tr><th>Склад</th><th>Код</th><th>Файл / ссылка</th><th class="num">Позиций</th><th class="num">Сопоставлено</th><th>Обновлён</th><th>Статус</th><th></th></tr>
       </thead>
       <tbody>
       <?php if ($warehouses === []): ?>
-        <tr><td colspan="6" class="muted">Складов пока нет — создайте первый.</td></tr>
+        <tr><td colspan="8" class="muted">Складов пока нет — создайте первый.</td></tr>
       <?php endif; ?>
       <?php foreach ($warehouses as $wh): ?>
-        <?php $isVirtual = (string) ($wh['kind'] ?? 'file') === 'virtual'; ?>
+        <?php $isVirtual = (string) ($wh['kind'] ?? 'file') === 'virtual'; $up = $uploadsByWarehouse[(int) $wh['id']] ?? null; ?>
         <tr>
           <td>
             <b><?= e((string) $wh['name']) ?></b>
@@ -645,9 +683,15 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
             <?php endif; ?>
           </td>
           <td class="mono small"><?= e((string) $wh['code']) ?></td>
+          <td class="small warehouse-file"><?= $isVirtual ? '—' : e($up === null ? 'Не настроен' : (string) ($up['fetch_method'] === 'url' ? $up['source_url'] : ($up['original_filename'] ?? '—'))) ?></td>
           <td class="num"><?= $isVirtual ? '—' : (int) $wh['items_count'] ?></td>
           <td class="num"><?= $isVirtual ? '—' : (int) $wh['confirmed_count'] ?></td>
+          <td class="small"><?= $isVirtual || $up === null ? '—' : e(format_datetime($up['last_run_at'] ?? null)) ?></td>
           <td>
+            <?php if (!$isVirtual && $up !== null): ?>
+              <span class="pill <?= $up['last_status'] === 'error' ? 'pill--error' : ($up['last_status'] === 'ok' ? 'pill--ok' : 'pill--never') ?>"><?= e(['ok'=>'OK', 'error'=>'Ошибка', 'running'=>'Импорт…', 'never'=>'Ещё не загружался'][$up['last_status']] ?? $up['last_status']) ?></span>
+              <?php if (!empty($up['last_error'])): ?><div class="small error-text"><?= e(mb_substr((string) $up['last_error'], 0, 200)) ?></div><?php endif; ?>
+            <?php endif; ?>
             <?php if ((int) $wh['is_active'] === 1): ?>
               <span class="pill pill--ok">активен</span>
             <?php else: ?>
@@ -656,8 +700,11 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
           </td>
           <td class="row-actions">
             <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&wh_form=<?= (int) $wh['id'] ?>">Изменить</a>
-            <?php if (!$isVirtual): ?>
-              <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&upload_form=<?= (int) $wh['id'] ?>">Файл и маппинг</a>
+            <?php if (!$isVirtual && $up !== null): ?>
+              <form method="post" class="inline">
+                <?= Csrf::field() ?><input type="hidden" name="action" value="upload-import"><input type="hidden" name="id" value="<?= (int) $up['id'] ?>">
+                <button class="btn btn--small btn--primary">Загрузить</button>
+              </form>
             <?php endif; ?>
             <form method="post" class="inline">
               <?= Csrf::field() ?>
@@ -680,13 +727,23 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
   </div>
 
   <?php if ($warehouseFormId !== null):
-      $whEdit = $warehouseFormId > 0 ? WarehouseRepository::find($warehouseFormId) : null; ?>
+      $whEdit = $warehouseFormId > 0 ? WarehouseRepository::find($warehouseFormId) : null;
+      $upEdit = $warehouseFormId > 0 ? UploadRepository::findByWarehouse($warehouseFormId) : null;
+      if (is_array($formOld) && (int) ($formOld['id'] ?? -1) === $warehouseFormId) {
+          $whEdit = array_merge($whEdit ?? [], $formOld);
+          $upEdit = array_merge($upEdit ?? [], array_intersect_key($formOld, array_flip(['type', 'fetch_method', 'source_url', 'csv_delimiter', 'csv_encoding', 'skip_rows', 'sheet_index', 'skip_hidden'])));
+          $upEdit['skip_hidden'] = isset($formOld['skip_hidden']) ? 1 : 0;
+      }
+      $upMapping = is_array($formOld) && (int) ($formOld['id'] ?? -1) === $warehouseFormId
+          ? (array) ($formOld['mapping'] ?? []) : ($upEdit !== null ? UploadRepository::mappingOf($upEdit) : []);
+  ?>
     <div class="card">
-      <h2 class="card__title"><?= $whEdit === null ? 'Новый склад' : 'Склад: ' . e((string) $whEdit['name']) ?></h2>
-      <form method="post">
+      <h2 class="card__title"><?= $warehouseFormId === 0 ? 'Новый склад' : 'Склад: ' . e((string) $whEdit['name']) ?></h2>
+      <form method="post" enctype="multipart/form-data" id="warehouse-settings">
         <?= Csrf::field() ?>
         <input type="hidden" name="action" value="warehouse-save">
-        <input type="hidden" name="id" value="<?= (int) ($whEdit['id'] ?? 0) ?>">
+        <input type="hidden" name="id" value="<?= $warehouseFormId ?>">
+        <h3 class="a-subtitle">Параметры склада</h3>
         <div class="grid-3">
           <label class="field"><span class="field__label">Название <span class="req">*</span></span>
             <input class="input" name="name" required maxlength="190" value="<?= e((string) ($whEdit['name'] ?? '')) ?>" placeholder="склад 1">
@@ -713,81 +770,9 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
             <span class="field__hint">Это число уйдёт в instock у всех офферов. В суммарный остаток для фильтра «исключать нулевые» не входит.</span>
           </label>
         </div>
-        <div class="form__actions">
-          <button class="btn btn--primary">Сохранить</button>
-          <a class="btn btn--ghost" href="yml.php?tab=warehouses">Отмена</a>
-        </div>
-      </form>
-    </div>
-  <?php endif; ?>
-
-  <h2 class="a-subtitle">Файлы остатков</h2>
-  <div class="card table-wrap">
-    <table class="table">
-      <thead>
-        <tr><th>Склад</th><th>Файл / ссылка</th><th>Тип</th><th class="num">Позиций</th><th>Обновлён</th><th>Статус</th><th></th></tr>
-      </thead>
-      <tbody>
-      <?php if ($uploads === []): ?>
-        <tr><td colspan="7" class="muted">Файлы ещё не настроены. Нажмите «Файл и маппинг» у склада.</td></tr>
-      <?php endif; ?>
-      <?php foreach ($uploads as $up): ?>
-        <tr>
-          <td><b><?= e((string) $up['warehouse_name']) ?></b></td>
-          <td class="mono small ellipsis">
-            <?= $up['fetch_method'] === 'url' ? e((string) $up['source_url']) : e((string) ($up['original_filename'] ?? $up['file_path'] ?? '—')) ?>
-          </td>
-          <td><?= e(UploadRepository::TYPES[(string) $up['type']] ?? (string) $up['type']) ?></td>
-          <td class="num"><?= (int) $up['items_count'] ?></td>
-          <td class="small"><?= e(format_datetime($up['last_run_at'] ?? null)) ?></td>
-          <td>
-            <?php
-            $pill = match ((string) $up['last_status']) {
-                'ok' => '<span class="pill pill--ok">OK</span>',
-                'error' => '<span class="pill pill--error">Ошибка</span>',
-                'running' => '<span class="pill pill--running">Импорт…</span>',
-                default => '<span class="pill pill--never">ещё не загружался</span>',
-            };
-            echo $pill;
-            ?>
-            <?php if ($up['last_status'] === 'error' && !empty($up['last_error'])): ?>
-              <div class="small error-text"><?= e(mb_substr((string) $up['last_error'], 0, 200)) ?></div>
-            <?php endif; ?>
-          </td>
-          <td class="row-actions">
-            <form method="post" class="inline">
-              <?= Csrf::field() ?>
-              <input type="hidden" name="action" value="upload-import">
-              <input type="hidden" name="id" value="<?= (int) $up['id'] ?>">
-              <button class="btn btn--small btn--primary">Загрузить</button>
-            </form>
-            <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&preview=<?= (int) $up['id'] ?>">Проверить маппинг</a>
-            <a class="btn btn--small btn--ghost" href="yml.php?tab=warehouses&upload_form=<?= (int) $up['warehouse_id'] ?>">Изменить</a>
-            <form method="post" class="inline" onsubmit="return confirm('Удалить файл и позиции склада?')">
-              <?= Csrf::field() ?>
-              <input type="hidden" name="action" value="upload-delete">
-              <input type="hidden" name="id" value="<?= (int) $up['id'] ?>">
-              <button class="btn btn--small btn--danger">Удалить</button>
-            </form>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
-  </div>
-
-  <?php if ($uploadFormWarehouse > 0):
-      $upWh = WarehouseRepository::find($uploadFormWarehouse);
-      $upEdit = UploadRepository::findByWarehouse($uploadFormWarehouse);
-      $upMapping = $upEdit !== null ? UploadRepository::mappingOf($upEdit) : [];
-      if ($upWh !== null): ?>
-    <div class="card">
-      <h2 class="card__title">Файл остатков: <?= e((string) $upWh['name']) ?></h2>
-      <p class="card__hint">Тот же механизм, что и у источников каталога: Excel, CSV или YML — файлом или по ссылке (Google Таблицы, Яндекс Диск).</p>
-      <form method="post" enctype="multipart/form-data">
-        <?= Csrf::field() ?>
-        <input type="hidden" name="action" value="upload-save">
-        <input type="hidden" name="warehouse_id" value="<?= (int) $uploadFormWarehouse ?>">
+        <fieldset class="warehouse-file-settings">
+          <legend>Файл остатков</legend>
+          <p class="card__hint">Excel, CSV или YML — файлом или по ссылке (Google Таблицы, Яндекс Диск).</p>
         <div class="grid-3">
           <label class="field"><span class="field__label">Тип файла</span>
             <select class="input" name="type">
@@ -834,18 +819,28 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
           </label>
         </div>
         <label class="check-inline"><input type="checkbox" name="skip_hidden"<?= chk((int) ($upEdit['skip_hidden'] ?? 1) === 1) ?>> Не импортировать скрытые строки и столбцы</label>
+        </fieldset>
         <div class="form__actions">
-          <button class="btn btn--primary" name="save_and_import" value="1">Сохранить и загрузить</button>
+          <button class="btn btn--primary warehouse-import-button" name="save_and_import" value="1">Сохранить и загрузить</button>
           <button class="btn btn--ghost">Сохранить</button>
+          <?php if ($upEdit !== null && !empty($upEdit['id'])): ?>
+            <button class="btn btn--ghost warehouse-import-button" name="save_and_preview" value="1">Проверить маппинг</button>
+          <?php endif; ?>
           <a class="btn btn--link" href="yml.php?tab=warehouses">Отмена</a>
         </div>
       </form>
+      <?php if ($upEdit !== null && !empty($upEdit['id'])): ?>
+      <form method="post" class="form__actions warehouse-file-delete" onsubmit="return confirm('Удалить только файл и его позиции? Сам склад сохранится.')">
+        <?= Csrf::field() ?><input type="hidden" name="action" value="upload-delete"><input type="hidden" name="id" value="<?= (int) $upEdit['id'] ?>">
+        <button class="btn btn--small btn--danger">Удалить файл и позиции</button>
+      </form>
+      <?php endif; ?>
     </div>
-  <?php endif; endif; ?>
+  <?php endif; ?>
 
   <?php if ($previewUpload !== null && $previewRows !== null): ?>
     <div class="card table-wrap">
-      <h2 class="card__title" style="padding:18px 18px 0">Проверка маппинга: <?= e((string) $previewUpload['warehouse_name'] ?? '') ?></h2>
+      <h2 class="card__title" style="padding:18px 18px 0">Проверка маппинга: <?= e((string) ($previewUpload['warehouse_name'] ?? '')) ?></h2>
       <p class="card__hint" style="padding:0 18px">Первые строки файла как есть. Столбцы для маппинга указывайте буквами: A — первый, B — второй и т.д.</p>
       <table class="table table--compact">
         <tbody>
@@ -1288,5 +1283,6 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 <?php endif; ?>
 
 </main>
+<script src="<?= e(asset('assets/js/admin.js', '../')) ?>" defer></script>
 </body>
 </html>

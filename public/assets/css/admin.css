@@ -145,3 +145,9 @@ a { color: var(--accent); }
   .table--compact thead { display: table-header-group; }
   .table--compact td::before { content: none; }
 }
+
+/* Единая форма склада и файла остатков. */
+.warehouse-file { max-width: 240px; overflow-wrap: anywhere; }
+.warehouse-file-settings { min-width: 0; margin: 18px 0; padding: 18px 0 0; border: 0; border-top: 1px solid var(--line); }
+.warehouse-file-settings legend { font-weight: 700; font-size: 16px; padding: 0 10px 0 0; }
+.warehouse-file-settings[hidden], .warehouse-import-button[hidden], .warehouse-file-delete[hidden] { display: none; }

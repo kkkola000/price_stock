@@ -56,3 +56,22 @@
   applyType();
   applyFetch();
 })();
+
+/* Виртуальный склад хранит постоянный остаток; файл сохраняется при смене типа. */
+(function () {
+  var form = document.getElementById('warehouse-settings');
+  if (!form) return;
+  var kind = form.querySelector('[name="kind"]');
+  function updateWarehouseKind() {
+    var virtual = kind.value === 'virtual';
+    var file = form.querySelector('.warehouse-file-settings');
+    file.hidden = virtual;
+    file.disabled = virtual;
+    form.querySelector('[name="default_stock"]').closest('.field').hidden = !virtual;
+    form.querySelectorAll('.warehouse-import-button').forEach(function (button) { button.hidden = virtual; });
+    var remove = document.querySelector('.warehouse-file-delete');
+    if (remove) remove.hidden = virtual;
+  }
+  kind.addEventListener('change', updateWarehouseKind);
+  updateWarehouseKind();
+})();
