@@ -87,6 +87,11 @@ try {
     $numericSettings=SettingsRepository::get();$numericSettings['skip_zero_stock']=1;
     $zero=FeedBuilder::buildFeed(['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds],$numericSettings,null,true);$paths[]=$zero['path'];
     ensureXml($zero['offers']===0,'Numeric replacement runs before zero-stock filter');
+    $current=SettingsRepository::get();
+    SettingsRepository::save('','','','',$numericMapping,$current['outlets_array'],false,true,true,2);
+    $apiRows=FeedBuilder::apiStocks(['warehouse_ids'=>$warehouseIds]);
+    ensureXml(count($apiRows)===1&&$apiRows[0]['offer_id']==='FILE-SKU'&&$apiRows[0]['stock']===0,'API exports file SKU and transformed zero despite YML zero filter');
+
     Db::run('UPDATE products SET stock_qty=NULL,stock_text=? WHERE id=?',['Более 5',$product]);
     $save($converted);
     $convertedTemplate=\App\YmlExport\XmlTemplate::fromSettings(SettingsRepository::get());

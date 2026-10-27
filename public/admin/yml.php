@@ -19,6 +19,9 @@ use App\YmlExport\UploadRepository;
 use App\YmlExport\WarehouseRepository;
 use App\YmlExport\XmlMapping;
 use App\YmlExport\XmlTemplate;
+use App\YmlExport\OzonSettings;
+use App\YmlExport\OzonClient;
+use App\YmlExport\OzonUpdater;
 
 /**
  * Раздел «Выгрузка YML» — дополнение к админ-панели.
@@ -80,6 +83,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
 
     switch ($action) {
+        case 'ozon-save':
+        case 'ozon-load':
+            try {
+                $ozon=OzonSettings::save($_POST);
+                unset($_SESSION['ozon_plan']);
+                if($action==='ozon-load') {
+                    $warehouses=(new OzonClient($ozon['client_id'],$ozon['api_key']))->warehouses();
+                    OzonSettings::storeWarehouses($warehouses,OzonSettings::fingerprint($ozon));
+                    flash('success','Получено складов Ozon: '.count($warehouses).'. Выберите склад и сохраните настройки.');
+                } else flash('success','Настройки Ozon сохранены.');
+            }catch(Throwable $exception){flash('error',$exception->getMessage());}
+            redirect('yml.php?tab=api');
+            break;
+        case 'ozon-preview':
+            unset($_SESSION['ozon_plan']);
+            try {
+                $ozon=OzonSettings::get();$rows=OzonUpdater::prepare($ozon);
+                $_SESSION['ozon_plan']=['id'=>bin2hex(random_bytes(16)),'created'=>time(),'fingerprint'=>OzonSettings::fingerprint($ozon),'hash'=>OzonUpdater::hash($rows),'rows'=>$rows];
+            }catch(Throwable $exception){flash('error',$exception->getMessage());}
+            redirect('yml.php?tab=api');
+            break;
+        case 'ozon-send':
+            $lock=null;
+            try {
+                $plan=$_SESSION['ozon_plan']??null;
+                if(!is_array($plan)||!hash_equals($plan['id'],(string)($_POST['plan_id']??''))||time()-$plan['created']>600)throw new RuntimeException('Предпросмотр устарел. Подготовьте обновление заново.');
+                $ozon=OzonSettings::get();$rows=OzonUpdater::prepare($ozon);
+                if(!hash_equals($plan['fingerprint'],OzonSettings::fingerprint($ozon))||!hash_equals($plan['hash'],OzonUpdater::hash($rows)))throw new RuntimeException('Настройки или остатки изменились. Подготовьте новый предпросмотр.');
+                $lock=fopen(APP_STORAGE.'/ozon-api.lock','c');
+                if($lock===false||!flock($lock,LOCK_EX|LOCK_NB))throw new RuntimeException('Другая отправка в Ozon уже выполняется.');
+                unset($_SESSION['ozon_plan']);
+                @set_time_limit(0);
+                $result=OzonUpdater::send(new OzonClient($ozon['client_id'],$ozon['api_key']),$rows);
+                $result['warehouse_id']=(int)$ozon['warehouse_id'];$result['warehouse_name']=$ozon['warehouse_name'];$result['client_id']=$ozon['client_id'];
+                try {OzonSettings::write('ozon-api-result.json',$result);}catch(Throwable $exception){flash('warning','Ответ Ozon получен, но журнал не удалось сохранить. Проверьте итоговые счётчики и остатки Ozon перед повторной отправкой.');}
+                flash($result['failed']+$result['not_sent']===0?'success':'warning','Ozon: подтверждено '.$result['success'].', не подтверждено '.$result['failed'].', не отправлено '.$result['not_sent'].'.');
+            }catch(Throwable $exception){flash('error',$exception->getMessage());}
+            finally{if(is_resource($lock)){flock($lock,LOCK_UN);fclose($lock);}}
+            redirect('yml.php?tab=api');
+            break;
+
         case 'warehouse-save':
             handleUploadSave(true);
             break;
@@ -662,6 +706,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <?php if ($pendingCount > 0): ?><span class="pill pill--running"><?= (int) $pendingCount ?></span><?php endif; ?></a>
     <a href="yml.php?tab=settings" class="<?= $tab === 'settings' ? 'is-active' : '' ?>">Настройка фида</a>
     <a href="yml.php?tab=feed" class="<?= $tab === 'feed' ? 'is-active' : '' ?>">Готовый фид</a>
+    <a href="yml.php?tab=api" class="<?= $tab === 'api' ? 'is-active' : '' ?>">Обновление по API</a>
   </div>
 
   <?php foreach ($flash as $item): ?>
@@ -1215,6 +1260,9 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <pre class="feed-preview"><?= e($templatePreview['xml']) ?></pre>
     <?php else: ?><p class="muted">Нажмите «Проверить шаблон»: предпросмотр использует текущий текст, переменные и соответствия остатков без сохранения настроек.</p><?php endif; ?>
   </div>
+
+<?php elseif ($tab === 'api'): ?>
+  <?php require APP_ROOT.'/app/Views/admin/ozon.php'; ?>
 
 <?php else: ?>
   <!-- ================= Готовый фид ================= -->

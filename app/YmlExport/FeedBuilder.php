@@ -53,41 +53,13 @@ final class FeedBuilder
         foreach (['root_name','shop_name','offers_name','offer_name'] as $name) {
             if (isset($outlets[$name]) && !preg_match('/^[A-Za-z_][A-Za-z0-9_.-]*$/', $outlets[$name])) throw new RuntimeException('Некорректное имя XML.');
         }
-        $onlyConfirmed = (int) $settings['only_confirmed'] === 1;
         $stockMap = $stockMapOverride ?? StockMapRepository::map();
         $stockFallback = (int) ($settings['stock_fallback'] ?? 0);
 
         $warehouseIds = array_values(array_filter(array_map('intval', $feed['warehouse_ids'] ?? [])));
         $virtualWarehouses = WarehouseRepository::virtualList($warehouseIds);
 
-        $statuses = $onlyConfirmed ? "('confirmed')" : "('confirmed','suggested')";
-
-        if ($warehouseIds === []) {
-            $rows = [];
-        } else {
-            $placeholders = implode(',', array_fill(0, count($warehouseIds), '?'));
-            $rows = Db::all(
-                "SELECT m.product_id, m.product_sku, m.warehouse_id, m.item_sku,
-                        w.name AS warehouse_name, w.sort AS warehouse_sort,
-                        i.name AS item_name, i.sku AS item_sku_live, i.stock_qty, i.stock_text,
-                        i.price, i.oldprice, i.min_price, i.extra
-                 FROM yx_matches m
-                 JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1
-                 LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
-                 WHERE m.status IN {$statuses} AND m.warehouse_id IN ({$placeholders})
-                 ORDER BY m.product_id, w.sort, w.id",
-                $warehouseIds
-            );
-        }
-
-        // Группируем склады по товару каталога; без product_id — по позиции склада.
-        $groups = [];
-        foreach ($rows as $row) {
-            $key = $row['product_id'] !== null
-                ? 'p' . $row['product_id']
-                : 'w' . $row['warehouse_id'] . ':' . $row['item_sku'];
-            $groups[$key][] = $row;
-        }
+        $groups = self::groups($feed,$settings);
 
         $dir = APP_STORAGE . '/feeds';
         if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
@@ -184,6 +156,64 @@ final class FeedBuilder
         if (!$preview) FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
 
         return ['offers' => $offers, 'path' => $file, 'diagnostic'=>$offers===0?self::diagnose($feed,$settings,$skipped):null];
+    }
+
+    /** Same confirmed matches, source-file identifiers and resolved catalog stock as YML. */
+    public static function apiStocks(array $feed): array
+    {
+        $settings=SettingsRepository::get();
+        $settings['only_confirmed']=1;
+        // Omitting a zero would leave the previous nonzero stock on the marketplace.
+        $settings['skip_zero_stock']=0;
+        $groups=self::groups($feed,$settings);$cache=[];$stocks=[];$stockMap=StockMapRepository::map();
+        $writer=new XMLWriter();$writer->openMemory();
+        foreach($groups as $group) {
+            self::buildOffer($writer,$group,[],[],$settings,$cache,$stockMap,(int)($settings['stock_fallback']??0),[],
+                static function(callable $resolve,array $warehouses)use(&$stocks):void {
+                    $id=trim($resolve(['type'=>'field','ref'=>'sku'],null));
+                    if($id==='')throw new RuntimeException('У позиции нет артикула из файла склада.');
+                    if(isset($stocks[$id]))throw new RuntimeException('Артикул «'.$id.'» сопоставлен с несколькими товарами. Исправьте сопоставления перед отправкой.');
+                    $stocks[$id]=['offer_id'=>$id,'stock'=>(int)$resolve(['type'=>'resolved','ref'=>'stock'],null)];
+                });
+        }
+        ksort($stocks,SORT_STRING);
+        return array_values($stocks);
+    }
+
+    private static function groups(array $feed,array $settings): array
+    {
+        $onlyConfirmed=(int)$settings['only_confirmed']===1;
+        $warehouseIds=array_values(array_filter(array_map('intval',$feed['warehouse_ids']??[])));
+        $statuses = $onlyConfirmed ? "('confirmed')" : "('confirmed','suggested')";
+
+        if ($warehouseIds === []) {
+            $rows = [];
+        } else {
+            $placeholders = implode(',', array_fill(0, count($warehouseIds), '?'));
+            $rows = Db::all(
+                "SELECT m.product_id, m.product_sku, m.warehouse_id, m.item_sku,
+                        w.name AS warehouse_name, w.sort AS warehouse_sort,
+                        i.name AS item_name, i.sku AS item_sku_live, i.stock_qty, i.stock_text,
+                        i.price, i.oldprice, i.min_price, i.extra
+                 FROM yx_matches m
+                 JOIN yx_warehouses w ON w.id = m.warehouse_id AND w.is_active = 1
+                 LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
+                 WHERE m.status IN {$statuses} AND m.warehouse_id IN ({$placeholders})
+                 ORDER BY m.product_id, w.sort, w.id",
+                $warehouseIds
+            );
+        }
+
+        // Группируем склады по товару каталога; без product_id — по позиции склада.
+        $groups = [];
+        foreach ($rows as $row) {
+            $key = $row['product_id'] !== null
+                ? 'p' . $row['product_id']
+                : 'w' . $row['warehouse_id'] . ':' . $row['item_sku'];
+            $groups[$key][] = $row;
+        }
+
+        return $groups;
     }
 
     /** Explain an empty result using the selected link's actual source data. */

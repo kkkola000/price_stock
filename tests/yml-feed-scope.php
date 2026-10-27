@@ -32,6 +32,9 @@ try {
     scopeCheck((string)$xml->shop->offers->offer[0]['id']==='FILE-1','ID from file');
     scopeCheck((string)$xml->shop->offers->offer[0]->outlets->outlet['instock']==='0','Zero stock included with filter off');
     scopeCheck((string)$xml->shop->offers->offer[1]->outlets->outlet['instock']==='10','Mapped catalog stock');
+    $apiRows=\App\YmlExport\OzonUpdater::prepare(['feed_id'=>$primary['id'],'warehouse_id'=>22142605386000]);
+    scopeCheck(count($apiRows)===30&&$apiRows[0]['offer_id']==='FILE-1'&&$apiRows[0]['stock']===0&&$apiRows[0]['warehouse_id']===22142605386000,'API export contains 30 confirmed file IDs, zero, destination warehouse');
+
     $built=FeedBuilder::buildFeed(FeedRepository::find($selected));$paths[]=$built['path'];
     scopeCheck($built['offers']===0,'Explicit selection does not leak other warehouse products');
     WarehouseRepository::setActive($wh,false);
