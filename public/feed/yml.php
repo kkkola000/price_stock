@@ -27,7 +27,7 @@ try {
     }
 
     $file = FeedBuilder::path((string) $feed['token']);
-    if (!is_file($file)) {
+    if (!is_file($file) || $feed['built_at'] === null) {
         FeedBuilder::buildFeed($feed);
     }
 

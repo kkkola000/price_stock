@@ -29,6 +29,7 @@ final class Schema
         '2026_10_05_02_yml_stock_map'       => ['table' => 'yx_stock_map', 'column' => null],
         '2026_10_05_03_yml_feed_warehouses' => ['table' => 'yx_warehouses', 'column' => 'in_feed'],
         '2026_10_06_01_yml_feeds'           => ['table' => 'yx_feeds', 'column' => null],
+        '2026_10_27_01_feed_warehouse_mode' => ['table'=>'yx_feeds','column'=>'warehouse_mode'],
     ];
 
     public static function ensure(): void

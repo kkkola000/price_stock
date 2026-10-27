@@ -182,11 +182,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 redirect('yml.php?tab=feed&feed_form=' . ($feedId > 0 ? $feedId : 'new'));
             }
             $feedWarehouseIds = array_map('intval', (array) ($_POST['warehouse_ids'] ?? []));
+            $feedMode=($_POST['warehouse_mode']??'selected')==='all'?'all':'selected';
+            if($feedMode==='selected'&&$feedWarehouseIds===[]) {
+                flash('error','Выберите хотя бы один склад или режим «Все активные склады».');
+                redirect('yml.php?tab=feed&feed_form='.($feedId>0?$feedId:'new'));
+            }
             if ($feedId > 0 && FeedRepository::find($feedId) !== null) {
-                FeedRepository::update($feedId, $feedName, $feedWarehouseIds);
+                FeedRepository::update($feedId, $feedName, $feedWarehouseIds, $feedMode);
                 flash('success', 'Ссылка «' . $feedName . '» сохранена.');
             } else {
-                FeedRepository::create($feedName, $feedWarehouseIds);
+                FeedRepository::create($feedName, $feedWarehouseIds, $feedMode);
                 flash('success', 'Ссылка «' . $feedName . '» создана — фид по ней уже доступен.');
             }
             rebuildQuiet();
@@ -1188,7 +1193,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         <tr>
           <td><b><?= e((string) $feedRow['name']) ?></b></td>
           <td><input class="input mono" readonly style="min-width:340px" value="<?= e($feedBaseUrl . $feedRow['token']) ?>" onclick="this.select()"></td>
-          <td class="num"><?= count((array) $feedRow['warehouse_ids']) ?></td>
+          <td class="num"><?= count((array) $feedRow['warehouse_ids']) ?><?php if(($feedRow['warehouse_mode']??'selected')==='all'): ?><div class="small muted">Все активные</div><?php endif; ?></td>
           <td class="small">
             <?php if ($feedRow['built_at'] !== null): ?>
               <?= e(format_datetime($feedRow['built_at'])) ?> · офферов: <b><?= (int) $feedRow['built_offers'] ?></b>
@@ -1239,6 +1244,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         <input type="hidden" name="id" value="<?= (int) $feedFormId ?>">
         <label class="field" style="max-width:420px"><span class="field__label">Название ссылки</span>
           <input class="input" name="name" required maxlength="190" value="<?= e((string) ($feedEdit['name'] ?? '')) ?>" placeholder="Например: Маркет"></label>
+        <label class="field" style="max-width:420px"><span class="field__label">Откуда брать товары и остатки</span><select class="input" name="warehouse_mode"><option value="all"<?= sel('all',$feedEdit['warehouse_mode']??'all') ?>>Все активные склады</option><option value="selected"<?= sel('selected',$feedEdit['warehouse_mode']??'all') ?>>Только выбранные ниже</option></select><span class="field__hint">Товары — подтверждённые сопоставления этих складов из раздела «Товары». В режиме «Все активные» новые склады подключаются автоматически.</span></label>
         <?php if ($warehouses === []): ?>
           <p class="muted">Складов пока нет — создайте их на вкладке «Склады и загрузка».</p>
         <?php endif; ?>

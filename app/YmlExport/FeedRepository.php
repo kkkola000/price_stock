@@ -28,8 +28,9 @@ final class FeedRepository
         foreach ($links as $link) {
             $byFeed[(int) $link['feed_id']][] = (int) $link['warehouse_id'];
         }
+        $allActive = array_map(static fn($row)=>(int)$row['id'],Db::all('SELECT id FROM yx_warehouses WHERE is_active=1 ORDER BY sort,id'));
         foreach ($feeds as &$feed) {
-            $feed['warehouse_ids'] = $byFeed[(int) $feed['id']] ?? [];
+            $feed['warehouse_ids'] = ($feed['warehouse_mode']??'selected')==='all' ? $allActive : ($byFeed[(int) $feed['id']] ?? []);
         }
         unset($feed);
 
@@ -65,17 +66,19 @@ final class FeedRepository
     /** @return list<int> */
     public static function warehouseIds(int $feedId): array
     {
+        if(Db::scalar('SELECT warehouse_mode FROM yx_feeds WHERE id=?',[$feedId])==='all') return array_map(static fn($row)=>(int)$row['id'],Db::all('SELECT id FROM yx_warehouses WHERE is_active=1 ORDER BY sort,id'));
         $rows = Db::all('SELECT warehouse_id FROM yx_feed_warehouses WHERE feed_id = ?', [$feedId]);
 
         return array_map(static fn (array $row): int => (int) $row['warehouse_id'], $rows);
     }
 
     /** @param list<int> $warehouseIds */
-    public static function create(string $name, array $warehouseIds): int
+    public static function create(string $name, array $warehouseIds, string $mode='selected'): int
     {
-        Db::run('INSERT INTO yx_feeds (name, token) VALUES (?, ?)', [
+        Db::run('INSERT INTO yx_feeds (name, token, warehouse_mode) VALUES (?, ?, ?)', [
             mb_substr($name, 0, 190),
             self::newToken(),
+            $mode==='all'?'all':'selected',
         ]);
         $id = Db::lastInsertId();
         self::setWarehouses($id, $warehouseIds);
@@ -84,9 +87,9 @@ final class FeedRepository
     }
 
     /** @param list<int> $warehouseIds */
-    public static function update(int $id, string $name, array $warehouseIds): void
+    public static function update(int $id, string $name, array $warehouseIds, string $mode='selected'): void
     {
-        Db::run('UPDATE yx_feeds SET name = ? WHERE id = ?', [mb_substr($name, 0, 190), $id]);
+        Db::run('UPDATE yx_feeds SET name = ?, warehouse_mode=?, built_at=NULL WHERE id = ?', [mb_substr($name, 0, 190), $mode==='all'?'all':'selected', $id]);
         self::setWarehouses($id, $warehouseIds);
     }
 
@@ -145,7 +148,7 @@ final class FeedRepository
             return;
         }
         $settings = SettingsRepository::get();
-        Db::run('INSERT INTO yx_feeds (name, token) VALUES (?, ?)', ['Основной фид', (string) $settings['token']]);
+        Db::run("INSERT INTO yx_feeds (name, token, warehouse_mode) VALUES (?, ?, 'all')", ['Основной фид', (string) $settings['token']]);
         $feedId = Db::lastInsertId();
         $ids = array_map(
             static fn (array $row): int => (int) $row['id'],
