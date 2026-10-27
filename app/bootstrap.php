@@ -33,7 +33,10 @@ if (!is_file($configFile)) {
         . 'и укажите параметры БД, затем откройте <code>/install.php</code>.</p>');
 }
 
-App\Support\Config::load(require $configFile);
+$configuration=require $configFile;
+$configuration['timezone']=App\Support\TimezoneSettings::current((string)($configuration['timezone']??'Asia/Almaty'));
+App\Support\Config::load($configuration);
+unset($configuration);
 
 error_reporting(E_ALL);
 ini_set('display_errors', App\Support\Config::get('debug') ? '1' : '0');

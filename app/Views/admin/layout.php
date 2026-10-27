@@ -24,6 +24,7 @@ $messages = flash();
       <a href="index.php">Источники</a>
       <a href="index.php?page=runs">Журнал импортов</a>
       <a href="yml.php">Выгрузка YML</a>
+      <a href="index.php?page=settings">Настройки</a>
       <a href="../index.php" target="_blank" rel="noopener">Витрина ↗</a>
     </nav>
     <div class="a-user">

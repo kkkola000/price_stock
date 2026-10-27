@@ -112,6 +112,17 @@ if ($pendingMigrations !== [] && in_array($page, $writeActions, true)) {
 /* ---------- Действия ---------- */
 
 switch ($page) {
+    case 'settings':
+        if ($_SERVER['REQUEST_METHOD']==='POST') {
+            try {
+                App\Support\TimezoneSettings::save(trim((string)($_POST['timezone']??'')));
+                flash('success','Часовой пояс сохранён.');
+            } catch (Throwable $exception) {flash('error',$exception->getMessage());}
+            redirect('index.php?page=settings');
+        }
+        render('admin/settings', [], 'Настройки сервиса');
+        exit;
+
     case 'source-save':
         handleSourceSave();
         break;

@@ -646,6 +646,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <a href="index.php">Источники</a>
       <a href="index.php?page=runs">Журнал импортов</a>
       <a href="yml.php" style="color: var(--accent)">Выгрузка YML</a>
+      <a href="index.php?page=settings">Настройки</a>
       <a href="../index.php">Витрина ↗</a>
     </nav>
     <div class="a-user"><?= e(Auth::username()) ?> · <a href="index.php?page=logout">выйти</a></div>

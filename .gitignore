@@ -11,3 +11,5 @@ storage/logs/*
 storage/backups/*
 storage/scheduler.json
 storage/reset.allow
+
+storage/timezone.json
