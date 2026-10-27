@@ -106,19 +106,24 @@
   var body = table.tBodies[0], serial = Date.now(), collapsed = new Set();
   var roots = {_catalog: null, _shop: '_catalog', _offers: '_shop', offer: '_offers'};
   var choices = {
-    field: {sku:'Артикул',name:'Название',price:'Цена',oldprice:'Старая цена',min_price:'Минимальная цена',stock:'Суммарный остаток'},
-    catalog: {sku:'Артикул',name:'Название',price:'Цена',promo_price:'Промоцена',effective_price:'Промоцена, иначе обычная цена',price_text:'Цена как на витрине',promo_price_text:'Промоцена как на витрине',stock:'Числовой остаток',stock_text:'Текст остатка'},
-    resolved: {stock:'Остаток с учётом соответствий',total_stock:'Суммарный остаток'},
-    warehouse: {name:'Название склада'}
+    file: {sku:'Артикул',name:'Название',price:'Цена',oldprice:'Старая цена',min_price:'Минимальная цена',stock:'Суммарный остаток',warehouse_name:'Название склада',__column__:'Столбец файла (A, B, AA)'},
+    catalog: {sku:'Артикул',name:'Название',price:'Цена',promo_price:'Промоцена',effective_price:'Промоцена, иначе обычная цена',price_text:'Цена как на витрине',promo_price_text:'Промоцена как на витрине',stock:'Остаток с учётом соответствий',total_stock:'Суммарный остаток',raw_stock:'Числовой остаток без соответствий',stock_text:'Текст остатка'}
   };
   function rows() { return Array.from(body.querySelectorAll('[data-xml-node]')); }
   function field(row, name) { return row.querySelector('[name^="' + name + '["]'); }
   function key(row) { return row.dataset.xmlWrapper || field(row,'map_key').value; }
   function parent(row) { return row.hasAttribute('data-xml-wrapper') ? roots[key(row)] : field(row,'map_parent').value; }
+  function refreshExtra(row) {
+    var extra = field(row,'map_extra'), value = field(row,'map_ref').value;
+    var needed = field(row,'map_type').value === 'file' && (value === '__column__' || value === '__constant__');
+    extra.hidden = !needed || field(row,'map_kind').value === 'block';
+    extra.placeholder = value === '__column__' ? 'Буква столбца, например A' : 'Постоянное значение';
+    extra.setAttribute('aria-label',value === '__column__' ? 'Буква столбца' : 'Постоянное значение');
+  }
   function refreshField(row) {
     var type = field(row,'map_type').value, old = field(row,'map_ref'), value = old.value;
     var previous = row.dataset.sourceType;
-    if (previous === type) return;
+    if (previous === type) { refreshExtra(row); return; }
     row.xmlValues = row.xmlValues || {};
     if (previous && previous !== type) {
       row.xmlValues[previous] = value;
@@ -137,6 +142,7 @@
     }
     control.name = old.name; control.className = 'input'; control.setAttribute('aria-label','Поле или значение');
     old.replaceWith(control);
+    refreshExtra(row);
   }
   function refresh() {
     var list = rows();

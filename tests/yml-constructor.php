@@ -10,6 +10,13 @@ $nodes=$settings['offer_mapping_array'];XmlMapping::validate($nodes);
 $legacy=[['kind'=>'attribute','name'=>'id','enabled'=>true,'source'=>['type'=>'field','ref'=>'sku']],['kind'=>'tag','name'=>'price','enabled'=>true,'source'=>['type'=>'catalog','ref'=>'price']]];
 $outlets=['enabled'=>true,'parent'=>'outlets','tag'=>'outlet','stock_attr'=>'instock','name_attr'=>'warehouse_name'];
 $tree=XmlMapping::upgrade($legacy,$outlets);XmlMapping::validate($tree);
+foreach ([['type'=>'field','ref'=>'sku'],['type'=>'column','ref'=>'AA'],['type'=>'constant','ref'=>'custom value'],['type'=>'catalog','ref'=>'price'],['type'=>'catalog','ref'=>'stock'],['type'=>'resolved','ref'=>'stock'],['type'=>'warehouse','ref'=>'name']] as $sourceRule) {
+    $form=XmlMapping::formSource($sourceRule);
+    ensureXml(in_array($form['type'],['file','catalog','constant'],true),'Three source options');
+    ensureXml(XmlMapping::sourceFromForm($form['type'],$form['ref'],$form['extra'])===$sourceRule,'Old source must round-trip without changing the feed');
+}
+ensureXml(XmlMapping::sourceFromForm('file','A')===['type'=>'column','ref'=>'A'],'Direct column letter');
+
 ensureXml(XmlMapping::upgrade($tree,$outlets)===$tree,'Upgrade must not duplicate warehouse blocks');
 $bad=$tree;$bad[0]['name']='bad<name';invalidXml($bad);
 $bad=$tree;$bad[2]['parent']='stock_row';invalidXml($bad);
@@ -33,9 +40,14 @@ try {
         $result=FeedBuilder::buildFeed(['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds]);$paths[]=$result['path'];
         $xml=simplexml_load_file($result['path']);ensureXml($xml!==false,'Generated XML parses');return $xml;
     };
-    $save($legacy);$xml=$build();$offer=$xml->shop->offers->offer;
+    $converted=$tree;
+    foreach($converted as &$node) { $form=XmlMapping::formSource($node['source']??[]);$node['source']=XmlMapping::sourceFromForm($form['type'],$form['ref'],$form['extra']); }
+    unset($node);
+    $converted[]=['key'=>'offer_stock','parent'=>'offer','kind'=>'tag','name'=>'quantity','enabled'=>true,'source'=>XmlMapping::sourceFromForm('catalog','stock')];
+    $save($converted);$xml=$build();$offer=$xml->shop->offers->offer;
     ensureXml((string)$offer['id']==='FILE-SKU','ID comes from warehouse file');
     ensureXml((string)$offer->price==='9760','Price from catalog');
+    ensureXml((string)$offer->quantity==='10','Mapped catalog stock directly in offer');
     ensureXml(count($offer->outlets->outlet)===3,'Two real warehouses and virtual');
     ensureXml((string)$offer->outlets->outlet[0]['instock']==='10'&&(string)$offer->outlets->outlet[1]['instock']==='10','Catalog text mapping: Более 5 -> 10');
     ensureXml((string)$offer->outlets->outlet[2]['instock']==='3','Virtual stock constant');

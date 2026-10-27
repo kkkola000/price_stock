@@ -398,7 +398,7 @@ function handleSettingsSave(): void
             'enabled'=>isset($_POST['map_enabled'][$i]),
             'kind'=>(string)($_POST['map_kind'][$i] ?? 'tag'),
             'repeat'=>(string)($_POST['map_repeat'][$i] ?? 'once'),
-            'source'=>['type'=>(string)($_POST['map_type'][$i] ?? 'constant'), 'ref'=>trim((string)($_POST['map_ref'][$i] ?? ''))],
+            'source'=>XmlMapping::sourceFromForm((string)($_POST['map_type'][$i] ?? 'file'), trim((string)($_POST['map_ref'][$i] ?? '')), (string)($_POST['map_extra'][$i] ?? '')),
         ];
     }
     try { XmlMapping::validate($rules); } catch (Throwable $exception) { $errors[]=$exception->getMessage(); }
@@ -578,7 +578,7 @@ function chk(bool $on): string
     return $on ? ' checked' : '';
 }
 
-$sourceTypeLabels = ['field' => 'Поле файла', 'column' => 'Столбец (буква)', 'catalog' => 'Витрина', 'constant' => 'Константа', 'resolved'=>'Остаток с соответствиями', 'warehouse'=>'Склад'];
+$sourceTypeLabels = ['file'=>'Файл', 'catalog'=>'Витрина', 'constant'=>'Константа'];
 $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 ?>
 <!doctype html>
@@ -1076,7 +1076,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 
     <div class="card">
       <h2 class="card__title">Конструктор YML</h2>
-      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Вложенность показана отступами. Родитель и тип элемента меняются через «Настроить элемент»; порядок — стрелками. Изменения применяются после сохранения. Для полей магазина и корневого элемента используйте источник «Константа».</p>
+      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Вложенность показана отступами. Родитель и тип элемента меняются через «Настроить элемент»; порядок — стрелками. Изменения применяются после сохранения. Для постоянных значений выберите источник «Константа».</p>
       <?php $xmlNodes=$settings['offer_mapping_array']; ?>
       <div class="table-wrap"><table class="table table--compact xml-tree" id="xml-tree">
         <thead><tr><th>Вкл.</th><th>Элемент</th><th>Имя в XML</th><th>Источник</th><th>Поле / значение</th><th>Действия</th></tr></thead>
@@ -1092,7 +1092,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         <button type="button" class="btn btn--ghost" data-xml-add="attribute">+ Добавить атрибут</button>
         <button type="button" class="btn btn--ghost" data-xml-add="block">+ Вложенный блок</button>
       </div>
-      <p class="field__hint">Выбирайте поля из списка: «Артикул», «Цена», «Остаток с учётом соответствий», «Название склада». Для столбца файла укажите букву, для константы — своё значение.</p>
+      <p class="field__hint">Выбирайте поля из списка: «Артикул», «Цена», «Остаток с учётом соответствий», «Название склада». Источники — «Файл», «Витрина» или «Константа». В поле выберите значение; для «Столбец файла» укажите букву A, B, AA.</p>
       <p class="field__hint">Поля витрины: price, promo_price, effective_price (промоцена, иначе обычная), name, sku, stock_text. Поля файла: sku, name, price, oldprice, min_price. Столбец файла: A, B, AA.</p>
       <template id="xml-node-template"><?php $i='__INDEX__'; $node=['key'=>'__KEY__','kind'=>'tag','name'=>'new_tag','parent'=>'offer','enabled'=>true,'repeat'=>'once','source'=>['type'=>'constant','ref'=>'']]; require APP_ROOT.'/app/Views/admin/xml_node.php'; ?></template>
     </div>

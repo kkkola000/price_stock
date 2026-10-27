@@ -31,6 +31,35 @@ final class XmlMapping
         return $nodes;
     }
 
+    /** Three user-facing sources, translated to the existing resolver without losing settings. */
+    public static function formSource(array $source): array
+    {
+        $type=$source['type']??'constant';$ref=(string)($source['ref']??'');
+        return match($type) {
+            'catalog'=>['type'=>'catalog','ref'=>$ref==='stock'?'raw_stock':$ref,'extra'=>''],
+            'resolved'=>['type'=>'catalog','ref'=>$ref==='total_stock'?'total_stock':'stock','extra'=>''],
+            'warehouse'=>['type'=>'file','ref'=>'warehouse_name','extra'=>''],
+            'column'=>['type'=>'file','ref'=>'__column__','extra'=>$ref],
+            'constant'=>['type'=>'constant','ref'=>$ref,'extra'=>''],
+            default=>['type'=>'file','ref'=>$ref,'extra'=>''],
+        };
+    }
+
+    public static function sourceFromForm(string $type, string $ref, string $extra=''): array
+    {
+        if($type==='file') {
+            if($ref==='__column__') return ['type'=>'column','ref'=>strtoupper(trim($extra))];
+            if($ref==='__constant__') return ['type'=>'constant','ref'=>$extra];
+            if($ref==='warehouse_name') return ['type'=>'warehouse','ref'=>'name'];
+            // Also accept a column letter supplied directly by an existing client.
+            if(preg_match('/^[A-Z]{1,3}$/',$ref)) return ['type'=>'column','ref'=>$ref];
+            return ['type'=>'field','ref'=>$ref];
+        }
+        if($type==='catalog'&&in_array($ref,['stock','total_stock'],true)) return ['type'=>'resolved','ref'=>$ref];
+        if($type==='catalog'&&$ref==='raw_stock') return ['type'=>'catalog','ref'=>'stock'];
+        return ['type'=>$type,'ref'=>$ref];
+    }
+
     public static function validate(array $nodes): void
     {
         if(count($nodes)>200) throw new InvalidArgumentException('В конструкторе допускается не более 200 элементов.');
@@ -68,7 +97,7 @@ final class XmlMapping
             if ($parent!=='offer' && ($warehouse || ($node['kind']!=='block' && ($source['type']??'')!=='constant'))) throw new InvalidArgumentException('Вне товара можно использовать только постоянные значения и обычные блоки.');
             if ($node['kind']!=='block' && !in_array($source['type']??'', ['field','column','catalog','constant','resolved','warehouse'], true)) throw new InvalidArgumentException('Неизвестный источник значения.');
             if($node['kind']!=='block'&&($source['type']??'')==='column'&&!preg_match('/^[A-Za-z]{1,3}$/',(string)($source['ref']??''))) throw new InvalidArgumentException('Столбец файла указывается буквой: A, B, AA.');
-            if($node['kind']!=='block'&&in_array($source['type']??'', ['warehouse','resolved'],true)&&!$warehouse&&($source['ref']??'')!=='total_stock') throw new InvalidArgumentException('Источник склада доступен внутри блока «Для каждого склада».');
+
         }
         if(!$hasId) throw new InvalidArgumentException('У offer нужен включённый атрибут id.');
     }

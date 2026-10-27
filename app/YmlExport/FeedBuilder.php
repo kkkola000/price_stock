@@ -255,10 +255,10 @@ final class FeedBuilder
         }
         $resolve = static function(array $source, ?array $warehouse) use ($primary,$group,$totalStock,&$productCache): string {
             if (($source['type'] ?? '') === 'resolved') {
-                return (string) (($source['ref'] ?? '') === 'total_stock' ? $totalStock : ($warehouse['resolved_qty'] ?? 0));
+                return (string) (($source['ref'] ?? '') === 'total_stock' ? $totalStock : ($warehouse['resolved_qty'] ?? $group[0]['resolved_qty'] ?? 0));
             }
-            if (($source['type'] ?? '') === 'warehouse') return (string) ($warehouse['warehouse_name'] ?? '');
-            if ($warehouse !== null && ($source['type'] ?? '') === 'field' && ($source['ref'] ?? '') === 'stock') return (string) ($warehouse['resolved_qty'] ?? 0);
+            if (($source['type'] ?? '') === 'warehouse') return (string) ($warehouse['warehouse_name'] ?? $primary['warehouse_name'] ?? '');
+            if ($warehouse !== null && ($source['type'] ?? '') === 'field' && ($source['ref'] ?? '') === 'stock') return (string) ($warehouse['resolved_qty'] ?? $group[0]['resolved_qty'] ?? 0);
             $context = $warehouse !== null && in_array($source['type'] ?? '', ['field','column'], true) ? $warehouse : $primary;
             return self::resolveSource($source, $context, $group, $totalStock, $productCache);
         };

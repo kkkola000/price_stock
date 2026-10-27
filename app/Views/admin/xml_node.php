@@ -1,6 +1,6 @@
 <?php
 /** @var array $node @var int|string $i */
-$src=(array)($node['source']??[]);
+$src=\App\YmlExport\XmlMapping::formSource((array)($node['source']??[]));
 ?>
 <tr data-xml-node>
   <td><input type="hidden" name="map_key[<?= e((string)$i) ?>]" value="<?= e($node['key']) ?>"><input type="checkbox" name="map_enabled[<?= e((string)$i) ?>]"<?= chk(!empty($node['enabled'])) ?> aria-label="Включить элемент"></td>
@@ -24,7 +24,7 @@ $src=(array)($node['source']??[]);
   </td>
   <td><input class="input mono" name="map_name[<?= e((string)$i) ?>]" value="<?= e($node['name']) ?>" aria-label="Имя XML"></td>
   <td><select class="input" name="map_type[<?= e((string)$i) ?>]" aria-label="Источник">
-    <?php foreach($sourceTypeLabels as $key=>$label): ?><option value="<?= e($key) ?>"<?= sel($key,$src['type']??'constant') ?>><?= e($label) ?></option><?php endforeach; ?>
-  </select></td><td><input class="input" name="map_ref[<?= e((string)$i) ?>]" value="<?= e((string)($src['ref']??'')) ?>" aria-label="Поле или значение" placeholder="sku · price · A · текст"></td>
+    <?php foreach($sourceTypeLabels as $key=>$label): ?><option value="<?= e($key) ?>"<?= sel($key,$src['type']??'file') ?>><?= e($label) ?></option><?php endforeach; ?>
+  </select></td><td><input class="input" name="map_ref[<?= e((string)$i) ?>]" value="<?= e((string)($src['ref']??'')) ?>" aria-label="Поле или значение" placeholder="Выберите поле"><input class="input xml-source-extra" name="map_extra[<?= e((string)$i) ?>]" value="<?= e($src['extra']) ?>" aria-label="Буква столбца или постоянное значение" hidden></td>
   <td><div class="xml-node-actions"><button class="btn btn--small btn--ghost" type="button" data-xml-move="up" aria-label="Выше">↑</button><button class="btn btn--small btn--ghost" type="button" data-xml-move="down" aria-label="Ниже">↓</button><button class="btn btn--small btn--danger" type="button" data-xml-remove aria-label="Удалить элемент">×</button></div></td>
 </tr>

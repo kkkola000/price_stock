@@ -5,6 +5,7 @@ const fs=require('fs'),assert=require('assert/strict');
 const p=await browser.newPage({viewport:{width:1536,height:1200}});const errors=[];p.on('pageerror',e=>errors.push(e.message));
 await p.goto('http://127.0.0.1:8080/admin/index.php?page=login');await p.locator('[name=username]').fill('devadmin');await p.locator('[name=password]').fill(fs.readFileSync(process.env.YML_TEST_PASSWORD_FILE,'utf8').trim());await p.locator('button[type=submit]').click();await p.goto('http://127.0.0.1:8080/admin/yml.php?tab=settings');
 assert.equal(await p.locator('[data-xml-wrapper]').count(),4);assert.equal(await p.locator('[data-xml-node] select[name^="map_ref"]').count(),7);
+for (const source of await p.locator('[name^="map_type["]').all()) assert.deepEqual(await source.locator('option').evaluateAll(options=>options.map(option=>option.textContent)),['Файл','Витрина','Константа']);
 const stock=p.locator('[data-xml-node]').filter({has:p.locator('[name^="map_name["][value="instock"]')});assert.equal(await stock.locator('[name^="map_ref["]').inputValue(),'stock');assert.equal(await stock.locator('[name^="map_ref["] option:checked').innerText(),'Остаток с учётом соответствий');
 const offer=p.locator('[data-xml-wrapper=offer]');await offer.locator('[data-xml-collapse]').click();assert(!(await stock.isVisible()));await offer.locator('[data-xml-collapse]').click();assert(await stock.isVisible());
 const depths=await stock.evaluate(r=>r.style.getPropertyValue('--xml-depth'));assert(Number(depths)>3);
