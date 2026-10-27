@@ -22,6 +22,7 @@ use App\YmlExport\XmlTemplate;
 use App\YmlExport\OzonSettings;
 use App\YmlExport\OzonClient;
 use App\YmlExport\OzonUpdater;
+use App\YmlExport\OzonScheduler;
 
 /**
  * Раздел «Выгрузка YML» — дополнение к админ-панели.
@@ -115,7 +116,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if($lock===false||!flock($lock,LOCK_EX|LOCK_NB))throw new RuntimeException('Другая отправка в Ozon уже выполняется.');
                 unset($_SESSION['ozon_plan']);
                 @set_time_limit(0);
+                $started=time();OzonScheduler::claim($ozon,$started);
                 $result=OzonUpdater::send(new OzonClient($ozon['client_id'],$ozon['api_key']),$rows);
+                $result['source']='manual';
+                try {OzonScheduler::recordResult($ozon,$result,$started);}catch(Throwable $exception){flash('warning','Не удалось сохранить время отправки для расписания. Проверьте права на storage.');}
                 $result['warehouse_id']=(int)$ozon['warehouse_id'];$result['warehouse_name']=$ozon['warehouse_name'];$result['client_id']=$ozon['client_id'];
                 try {OzonSettings::write('ozon-api-result.json',$result);}catch(Throwable $exception){flash('warning','Ответ Ozon получен, но журнал не удалось сохранить. Проверьте итоговые счётчики и остатки Ozon перед повторной отправкой.');}
                 flash($result['failed']+$result['not_sent']===0?'success':'warning','Ozon: подтверждено '.$result['success'].', не подтверждено '.$result['failed'].', не отправлено '.$result['not_sent'].'.');

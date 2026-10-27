@@ -42,6 +42,7 @@ $updateYml = static function () use ($log): void {
             $stats['feeds'],
             $stats['offers']
         ));
+        if(isset($stats['ozon']))$log('Ozon: '.$stats['ozon']['status'].(isset($stats['ozon']['message'])?' — '.$stats['ozon']['message']:''));
     } catch (Throwable $exception) {
         error_log('[yml-export] автообновление: ' . $exception->getMessage());
         $log('YML-фиды: ошибка автообновления — ' . $exception->getMessage());

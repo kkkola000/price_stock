@@ -10,6 +10,9 @@ final class Db
 {
     private static ?PDO $pdo = null;
 
+    /** Release an idle connection between ticks of a long-running CLI worker. */
+    public static function disconnect(): void { self::$pdo=null; }
+
     public static function pdo(): PDO
     {
         if (self::$pdo instanceof PDO) {

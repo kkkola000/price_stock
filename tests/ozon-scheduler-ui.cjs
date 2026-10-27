@@ -1,0 +1,15 @@
+// Clean development instance only. No Ozon requests are made by this test.
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{execFileSync}=require('child_process');
+const root=path.resolve(__dirname,'..'),base=(process.env.YML_TEST_BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/,'');
+const file=path.join(root,'storage/ozon-api.json');
+if(fs.existsSync(file))throw new Error('Existing Ozon settings preserved. Use a clean development instance.');
+(async()=>{const browser=await chromium.launch({executablePath:process.env.BROWSER_PATH || '/usr/bin/chromium',args:['--no-sandbox']});try{
+execFileSync(process.env.PHP_BIN || 'php',['-r',`require 'app/bootstrap.php'; App\\YmlExport\\Schema::ensure(); App\\YmlExport\\FeedRepository::ensureDefault(); $feed=App\\YmlExport\\FeedRepository::list()[0]; App\\YmlExport\\OzonSettings::save(['client_id'=>'123','api_key'=>'schedule-ui-test-not-real','feed_id'=>$feed['id']]); App\\YmlExport\\OzonSettings::storeWarehouses([['warehouse_id'=>22142605386000,'name'=>'Warehouse A'],['warehouse_id'=>22142605386001,'name'=>'Warehouse B']]);`],{cwd:root,encoding:'utf8'});
+const p=await browser.newPage();await p.goto(base+'/admin/index.php?page=login');await p.locator('[name=username]').fill(process.env.YML_TEST_USER || 'devadmin');await p.locator('[name=password]').fill(fs.readFileSync(process.env.YML_TEST_PASSWORD_FILE,'utf8').trim());await p.locator('button[type=submit]').click();await p.goto(base+'/admin/yml.php?tab=api');
+await p.locator('[name=warehouse_id]').selectOption('22142605386001');await p.locator('[name=interval_seconds]').fill('30');await p.locator('[name=auto_enabled]').check();await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Сохранить настройки',exact:true}).click()]);
+assert.equal(await p.locator('[name=warehouse_id]').inputValue(),'22142605386001');assert.equal(await p.locator('[name=interval_seconds]').inputValue(),'30');assert(await p.locator('[name=auto_enabled]').isChecked());assert(await p.getByText('Включено · каждые 30 сек.',{exact:true}).isVisible());assert(!(await p.content()).includes('schedule-ui-test-not-real'));
+const settings=JSON.parse(fs.readFileSync(file,'utf8'));assert.equal(settings.warehouse_name,'Warehouse B');assert.equal(settings.interval_seconds,30);assert.equal(settings.auto_enabled,true);
+const csrf=await p.locator('[name=csrf_token]').first().inputValue();await p.request.post(base+'/admin/yml.php?tab=api',{form:{action:'ozon-save',csrf_token:csrf,client_id:'123',api_key:'',feed_id:String(settings.feed_id),warehouse_id:'22142605386001',auto_enabled:'1',interval_seconds:'0'}});await p.reload();assert.equal(await p.locator('[name=interval_seconds]').inputValue(),'30');
+console.log('PASS UI: target warehouse selection, 30-second interval, enabled state, key privacy, invalid interval rejected without overwriting');
+}finally{await browser.close();if(fs.existsSync(file))fs.unlinkSync(file);}})().catch(e=>{console.error(e);process.exit(1)});

@@ -17,7 +17,7 @@ namespace App\YmlExport;
 final class AutoUpdater
 {
     /**
-     * @return array{uploads:int,failed:int,feeds:int,offers:int}
+     * @return array{uploads:int,failed:int,feeds:int,offers:int,ozon:array}
      */
     public static function run(): array
     {
@@ -34,12 +34,14 @@ final class AutoUpdater
             }
         }
 
+        $ozon=OzonScheduler::tick();
         $built = FeedBuilder::buildAll();
 
         return [
             'uploads' => $uploads,
             'failed'  => $failed,
             'feeds'   => $built['feeds'],
+            'ozon'    => $ozon,
             'offers'  => $built['offers'],
         ];
     }
