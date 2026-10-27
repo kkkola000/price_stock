@@ -75,3 +75,26 @@
   kind.addEventListener('change', updateWarehouseKind);
   updateWarehouseKind();
 })();
+
+/* Native dialogs provide focus containment and Escape handling. */
+(function () {
+  document.querySelectorAll('[data-open-dialog]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      document.getElementById(button.dataset.openDialog).showModal();
+    });
+  });
+  document.querySelectorAll('[data-close-dialog]').forEach(function (button) {
+    button.addEventListener('click', function () { button.closest('dialog').close(); });
+  });
+  var picker = document.getElementById('match-picker');
+  if (picker) {
+    picker.addEventListener('close', function () {
+      var url = new URL(window.location.href);
+      ['match_id', 'q', 'field'].forEach(function (key) { url.searchParams.delete(key); });
+      window.history.replaceState(null, '', url);
+    });
+    picker.showModal();
+    var input = picker.querySelector('[name="q"]');
+    if (input) input.focus();
+  }
+})();

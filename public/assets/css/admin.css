@@ -151,3 +151,11 @@ a { color: var(--accent); }
 .warehouse-file-settings { min-width: 0; margin: 18px 0; padding: 18px 0 0; border: 0; border-top: 1px solid var(--line); }
 .warehouse-file-settings legend { font-weight: 700; font-size: 16px; padding: 0 10px 0 0; }
 .warehouse-file-settings[hidden], .warehouse-import-button[hidden], .warehouse-file-delete[hidden] { display: none; }
+
+.match-dialog { border: 0; border-radius: var(--radius); padding: 22px; width: min(900px, calc(100% - 24px)); max-height: calc(100dvh - 32px); overflow: auto; color: var(--text); background: var(--surface); box-shadow: var(--shadow); }
+.match-dialog::backdrop { background: rgba(20,25,40,.5); }
+.match-dialog--small { width: min(520px, calc(100% - 24px)); }
+.match-dialog__header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.match-search { margin: 0; flex: 1; }
+.match-search > input.input { flex: 1; min-width: 150px; width: auto; }
+.match-search-field { width: auto; max-width: 200px; }

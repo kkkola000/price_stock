@@ -69,33 +69,42 @@ final class Matcher
      *
      * @return list<array<string,mixed>>
      */
-    public static function candidates(string $query, int $limit = 8): array
+    public static function candidates(string $query, int $limit = 8, string $field = 'all'): array
     {
         $query = trim($query);
-        if ($query === '') {
-            return [];
-        }
+        if ($query === '') return [];
+        [$where, $params] = self::searchWhere($query, $field, ['sku'=>'p.sku', 'name'=>'p.name'], ['s.name']);
+        return Db::all('SELECT p.id, p.sku, p.name, s.name AS supplier_name,
+                IF(UPPER(TRIM(p.sku)) = ?, 100, 0) AS score
+            FROM products p JOIN sources s ON s.id = p.source_id
+            WHERE s.is_active = 1 AND (' . $where . ')
+            ORDER BY score DESC, p.name, p.id LIMIT ' . max(1, min(100, $limit)),
+            array_merge([mb_strtoupper($query, 'UTF-8')], $params));
+    }
 
-        // Сначала точное попадание по артикулу, затем подстроки в названии.
-        $rows = Db::all(
-            'SELECT id, sku, name FROM products
-             WHERE UPPER(TRIM(sku)) = ? OR name LIKE ? OR sku LIKE ?
-             ORDER BY name
-             LIMIT 200',
-            [mb_strtoupper($query, 'UTF-8'), '%' . $query . '%', '%' . $query . '%']
-        );
+    /** Literal substring search; field names are selected only from server-owned columns. */
+    private static function searchWhere(string $query, string $field, array $columns, array $extra = []): array
+    {
+        if ($query === '') return ['1=1', []];
+        $selected = isset($columns[$field]) ? (array) $columns[$field]
+            : array_merge(...array_merge(array_map(static fn($value): array => (array) $value, array_values($columns)), [$extra]));
+        $pattern = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $query) . '%';
+        return [implode(' OR ', array_map(static fn(string $column): string => $column . " LIKE ? ESCAPE '!'", $selected)),
+            array_fill(0, count($selected), $pattern)];
+    }
 
-        $normalized = self::normalize($query);
-        foreach ($rows as &$row) {
-            $score = 0;
-            similar_text($normalized, self::normalize((string) $row['name']), $score);
-            $row['score'] = (int) round($score);
-        }
-        unset($row);
+    public static function find(int $id): ?array
+    {
+        return Db::first('SELECT m.*, i.name AS item_name, w.name AS warehouse_name
+            FROM yx_matches m LEFT JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
+            JOIN yx_warehouses w ON w.id=m.warehouse_id WHERE m.id=?', [$id]);
+    }
 
-        usort($rows, static fn (array $a, array $b): int => $b['score'] <=> $a['score']);
-
-        return array_slice($rows, 0, $limit);
+    /** Remove confirmations only, including entries outside the visible/filtered list. */
+    public static function clearConfirmed(): int
+    {
+        return Db::run("UPDATE yx_matches SET status=IF(product_id IS NULL, 'unmatched', 'suggested'),
+            confirmed_by=NULL, confirmed_at=NULL WHERE status='confirmed'")->rowCount();
     }
 
     /** Подтверждение пары администратором (в т.ч. с выбранным вручную товаром). */
@@ -176,8 +185,10 @@ final class Matcher
      *
      * @return list<array<string,mixed>>
      */
-    public static function confirmedList(int $limit = 500): array
+    public static function confirmedList(int $limit = 500, string $query = '', string $field = 'all'): array
     {
+        [$search, $params] = self::searchWhere(trim($query), $field,
+            ['sku'=>['m.item_sku','p.sku'], 'name'=>['i.name','p.name']], ['w.name']);
         return Db::all(
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
@@ -185,9 +196,9 @@ final class Matcher
              LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
              LEFT JOIN yx_warehouses w ON w.id = m.warehouse_id
              LEFT JOIN products p ON p.id = m.product_id
-             WHERE m.status = 'confirmed'
+             WHERE m.status = 'confirmed' AND (" . $search . ")
              ORDER BY w.sort, w.id, m.id
-             LIMIT " . max(1, $limit)
+             LIMIT " . max(1, $limit), $params
         );
     }
 
@@ -196,8 +207,10 @@ final class Matcher
      *
      * @return list<array<string,mixed>>
      */
-    public static function queue(int $limit = 300): array
+    public static function queue(int $limit = 300, string $query = '', string $field = 'all'): array
     {
+        [$search, $params] = self::searchWhere(trim($query), $field,
+            ['sku'=>['m.item_sku','p.sku'], 'name'=>['i.name','p.name']], ['w.name']);
         return Db::all(
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
@@ -205,9 +218,9 @@ final class Matcher
              LEFT JOIN yx_items i ON i.warehouse_id = m.warehouse_id AND i.sku = m.item_sku
              LEFT JOIN yx_warehouses w ON w.id = m.warehouse_id
              LEFT JOIN products p ON p.id = m.product_id
-             WHERE m.status IN ('suggested', 'unmatched')
+             WHERE m.status IN ('suggested', 'unmatched') AND (" . $search . ")
              ORDER BY (m.status = 'suggested') DESC, m.score DESC, m.id
-             LIMIT " . max(1, $limit)
+             LIMIT " . max(1, $limit), $params
         );
     }
 

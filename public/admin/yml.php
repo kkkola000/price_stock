@@ -129,7 +129,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Matcher::confirm($matchId, $productId > 0 ? $productId : null, $adminId);
             flash('success', 'Сопоставление подтверждено.');
             rebuildQuiet();
-            redirect('yml.php?tab=matches');
+            redirect('yml.php?' . http_build_query([
+                'tab'=>'matches', 'sub'=>(($_POST['return_sub'] ?? '') === 'items' ? 'items' : 'queue'),
+                'list_q'=>(string) ($_POST['list_q'] ?? ''), 'list_field'=>(string) ($_POST['list_field'] ?? 'all'),
+            ]));
+            break;
+
+        case 'match-clear':
+            $count = Matcher::clearConfirmed();
+            rebuildQuiet();
+            flash('success', 'Снято подтверждений: ' . $count . '. Позиции возвращены в очередь.');
+            redirect('yml.php?tab=matches&sub=items');
             break;
 
         case 'match-bulk':
@@ -512,23 +522,15 @@ if ($tab === 'settings' && isset($_GET['add_stock'])) {
 }
 
 $matchesSub = (string) ($_GET['sub'] ?? 'queue') === 'items' ? 'items' : 'queue';
-$queue = ($tab === 'matches' && $matchesSub === 'queue') ? Matcher::queue() : [];
-$confirmedRows = ($tab === 'matches' && $matchesSub === 'items') ? Matcher::confirmedList() : [];
-$manualMatch = null;
-$candidates = [];
-if ($tab === 'matches' && $matchesSub === 'queue' && isset($_GET['match_id'])) {
-    $matchId = (int) $_GET['match_id'];
-    foreach (Matcher::queue(1000) as $row) {
-        if ((int) $row['id'] === $matchId) {
-            $manualMatch = $row;
-            break;
-        }
-    }
-    $q = trim((string) ($_GET['q'] ?? ''));
-    if ($q !== '') {
-        $candidates = Matcher::candidates($q);
-    }
-}
+$listQuery = trim((string) ($_GET['list_q'] ?? ''));
+$searchField = static fn(string $value): string => in_array($value, ['sku','name'], true) ? $value : 'all';
+$listField = $searchField((string) ($_GET['list_field'] ?? 'all'));
+$queue = ($tab === 'matches' && $matchesSub === 'queue') ? Matcher::queue(300, $listQuery, $listField) : [];
+$confirmedRows = ($tab === 'matches' && $matchesSub === 'items') ? Matcher::confirmedList(500, $listQuery, $listField) : [];
+$manualMatch = $tab === 'matches' && isset($_GET['match_id']) ? Matcher::find((int) $_GET['match_id']) : null;
+$candidateQuery = trim((string) ($_GET['q'] ?? ''));
+$candidateField = $searchField((string) ($_GET['field'] ?? 'all'));
+$candidates = $manualMatch !== null ? Matcher::candidates($candidateQuery, 50, $candidateField) : [];
 
 $previewRows = null;
 $previewUpload = null;
@@ -867,6 +869,86 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <?php if ((int) $matchStats['confirmed'] > 0): ?><span class="pill pill--ok"><?= (int) $matchStats['confirmed'] ?></span><?php endif; ?></a>
   </div>
 
+  <div class="toolbar">
+    <form method="get" class="form__actions match-search">
+      <input type="hidden" name="tab" value="matches"><input type="hidden" name="sub" value="<?= e($matchesSub) ?>">
+      <input class="input" name="list_q" value="<?= e($listQuery) ?>" placeholder="Артикул или название" aria-label="Поиск сопоставлений">
+      <select class="input match-search-field" name="list_field" aria-label="Искать в">
+        <?php foreach (['all'=>'По всем полям','sku'=>'По артикулу','name'=>'По названию'] as $key=>$label): ?>
+          <option value="<?= e($key) ?>"<?= sel($key,$listField) ?>><?= e($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <button class="btn btn--primary">Найти</button>
+      <?php if ($listQuery !== ''): ?><a class="btn btn--ghost" href="?tab=matches&sub=<?= e($matchesSub) ?>">Сбросить</a><?php endif; ?>
+    </form>
+    <button type="button" class="btn btn--danger" data-open-dialog="match-clear"<?= $matchStats['confirmed'] === 0 ? ' disabled' : '' ?>>Очистить список товаров</button>
+  </div>
+  <dialog class="match-dialog match-dialog--small" id="match-clear" aria-labelledby="match-clear-title">
+    <h2 class="card__title" id="match-clear-title">Очистить список товаров?</h2>
+    <p>Все подтверждённые сопоставления будут сняты, включая скрытые поиском. Позиции вернутся в очередь «К сопоставлению».</p>
+    <p class="muted">Файлы складов и товары каталога сохранятся. Эти позиции не попадут в фиды до повторного подтверждения.</p>
+    <form method="post" class="form__actions">
+      <?= Csrf::field() ?><input type="hidden" name="action" value="match-clear">
+      <button type="button" class="btn btn--ghost" data-close-dialog>Отмена</button>
+      <button class="btn btn--danger">Очистить список</button>
+    </form>
+  </dialog>
+  <?php if ($manualMatch !== null): ?>
+    <dialog class="match-dialog" id="match-picker" aria-labelledby="match-picker-title">
+      <div class="match-dialog__header"><h2 class="card__title" id="match-picker-title">Выбрать другой товар</h2><button type="button" class="btn btn--ghost" data-close-dialog aria-label="Закрыть">×</button></div>
+      <p class="card__hint">
+        Позиция: <b><?= e((string) ($manualMatch['item_name'] ?? $manualMatch['item_sku'])) ?></b>
+        <span class="mono small muted"><?= e((string) $manualMatch['item_sku']) ?></span>
+        · склад «<?= e((string) $manualMatch['warehouse_name']) ?>»
+      </p>
+      <form method="get" class="form__actions" style="margin-bottom:14px">
+        <input type="hidden" name="tab" value="matches">
+        <input type="hidden" name="sub" value="<?= e($matchesSub) ?>">
+        <input type="hidden" name="match_id" value="<?= (int) $manualMatch['id'] ?>">
+        <input type="hidden" name="list_q" value="<?= e($listQuery) ?>">
+        <input type="hidden" name="list_field" value="<?= e($listField) ?>">
+        <input class="input" style="max-width:320px" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>" placeholder="Поиск по названию или артикулу каталога">
+        <select class="input match-search-field" name="field" aria-label="Искать в">
+          <?php foreach (['all'=>'По всем полям','sku'=>'По артикулу','name'=>'По названию'] as $key=>$label): ?>
+            <option value="<?= e($key) ?>"<?= sel($key,$candidateField) ?>><?= e($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <button class="btn btn--primary">Найти</button>
+        <button class="btn btn--ghost" type="button" data-close-dialog>Отмена</button>
+      </form>
+      <?php if (trim((string) ($_GET['q'] ?? '')) !== ''): ?>
+        <?php if ($candidates === []): ?>
+          <p class="muted">Ничего не найдено — попробуйте другой запрос.</p>
+        <?php else: ?>
+          <div class="table-wrap"><table class="table table--compact"><thead><tr><th>Наименование / артикул</th><th>Поставщик</th><th></th></tr></thead>
+            <tbody>
+            <?php foreach ($candidates as $candidate): ?>
+              <tr>
+                <td><b><?= e((string) $candidate['name']) ?></b><br><span class="mono small muted"><?= e((string) $candidate['sku']) ?></span></td>
+                <td><?= e((string) $candidate['supplier_name']) ?></td>
+                <td class="row-actions">
+                  <form method="post" class="inline">
+                    <?= Csrf::field() ?>
+                    <input type="hidden" name="action" value="match-confirm">
+                    <input type="hidden" name="match_id" value="<?= (int) $manualMatch['id'] ?>">
+        <input type="hidden" name="list_q" value="<?= e($listQuery) ?>">
+        <input type="hidden" name="list_field" value="<?= e($listField) ?>">
+                    <input type="hidden" name="product_id" value="<?= (int) $candidate['id'] ?>">
+                    <input type="hidden" name="return_sub" value="<?= e($matchesSub) ?>">
+                    <input type="hidden" name="list_q" value="<?= e($listQuery) ?>">
+                    <input type="hidden" name="list_field" value="<?= e($listField) ?>">
+                    <button class="btn btn--small btn--primary">Выбрать</button>
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table></div>
+        <?php endif; ?>
+      <?php endif; ?>
+    </dialog>
+  <?php endif; ?>
+
 <?php if ($matchesSub === 'queue'): ?>
   <div class="toolbar">
     <div class="toolbar__stats">
@@ -885,49 +967,6 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
     </div>
   </div>
 
-  <?php if ($manualMatch !== null): ?>
-    <div class="card">
-      <h2 class="card__title">Ручное сопоставление</h2>
-      <p class="card__hint">
-        Позиция: <b><?= e((string) ($manualMatch['item_name'] ?? $manualMatch['item_sku'])) ?></b>
-        <span class="mono small muted"><?= e((string) $manualMatch['item_sku']) ?></span>
-        · склад «<?= e((string) $manualMatch['warehouse_name']) ?>»
-      </p>
-      <form method="get" class="form__actions" style="margin-bottom:14px">
-        <input type="hidden" name="tab" value="matches">
-        <input type="hidden" name="match_id" value="<?= (int) $manualMatch['id'] ?>">
-        <input class="input" style="max-width:320px" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>" placeholder="Поиск по названию или артикулу каталога">
-        <button class="btn btn--primary">Найти</button>
-        <a class="btn btn--ghost" href="yml.php?tab=matches">Закрыть</a>
-      </form>
-      <?php if (trim((string) ($_GET['q'] ?? '')) !== ''): ?>
-        <?php if ($candidates === []): ?>
-          <p class="muted">Ничего не найдено — попробуйте другой запрос.</p>
-        <?php else: ?>
-          <table class="table table--compact">
-            <tbody>
-            <?php foreach ($candidates as $candidate): ?>
-              <tr>
-                <td><b><?= e((string) $candidate['name']) ?></b><br><span class="mono small muted"><?= e((string) $candidate['sku']) ?></span></td>
-                <td><span class="pill <?= (int) $candidate['score'] >= 50 ? 'pill--running' : 'pill--never' ?>"><?= (int) $candidate['score'] ?>%</span></td>
-                <td class="row-actions">
-                  <form method="post" class="inline">
-                    <?= Csrf::field() ?>
-                    <input type="hidden" name="action" value="match-confirm">
-                    <input type="hidden" name="match_id" value="<?= (int) $manualMatch['id'] ?>">
-                    <input type="hidden" name="product_id" value="<?= (int) $candidate['id'] ?>">
-                    <button class="btn btn--small btn--primary">Подтвердить</button>
-                  </form>
-                </td>
-              </tr>
-            <?php endforeach; ?>
-            </tbody>
-          </table>
-        <?php endif; ?>
-      <?php endif; ?>
-    </div>
-  <?php endif; ?>
-
   <div class="card table-wrap">
     <table class="table">
       <thead>
@@ -935,7 +974,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       </thead>
       <tbody>
       <?php if ($queue === []): ?>
-        <tr><td colspan="5" class="muted">Очередь пуста: все позиции сопоставлены и подтверждены.</td></tr>
+        <tr><td colspan="5" class="muted"><?= $listQuery !== '' ? 'Ничего не найдено — измените запрос.' : 'Очередь пуста: все позиции сопоставлены и подтверждены.' ?></td></tr>
       <?php endif; ?>
       <?php foreach ($queue as $row): ?>
         <tr>
@@ -972,7 +1011,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
                 <button class="btn btn--small btn--primary">Подтвердить</button>
               </form>
             <?php endif; ?>
-            <a class="btn btn--small btn--ghost" href="yml.php?tab=matches&match_id=<?= (int) $row['id'] ?>"><?= $row['product_id'] !== null ? 'Другой' : 'Сопоставить' ?></a>
+            <a class="btn btn--small btn--ghost" href="yml.php?tab=matches&match_id=<?= (int) $row['id'] ?>&list_q=<?= e(rawurlencode($listQuery)) ?>&list_field=<?= e($listField) ?>"><?= $row['product_id'] !== null ? 'Другой' : 'Сопоставить' ?></a>
             <?php if ($row['product_id'] !== null): ?>
               <form method="post" class="inline">
                 <?= Csrf::field() ?>
@@ -1026,6 +1065,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
             <?php endif; ?>
           </td>
           <td class="row-actions">
+            <a class="btn btn--small btn--ghost" href="yml.php?tab=matches&sub=items&match_id=<?= (int) $row['id'] ?>&list_q=<?= e(rawurlencode($listQuery)) ?>&list_field=<?= e($listField) ?>">Другой</a>
             <form method="post" class="inline" onsubmit="return confirm('Удалить сопоставление? Позиция вернётся в очередь «К сопоставлению».')">
               <?= Csrf::field() ?>
               <input type="hidden" name="action" value="match-unmatch">
