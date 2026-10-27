@@ -51,6 +51,17 @@ try {
     ensureXml(count($offer->outlets->outlet)===3,'Two real warehouses and virtual');
     ensureXml((string)$offer->outlets->outlet[0]['instock']==='10'&&(string)$offer->outlets->outlet[1]['instock']==='10','Catalog text mapping: Более 5 -> 10');
     ensureXml((string)$offer->outlets->outlet[2]['instock']==='3','Virtual stock constant');
+    $convertedTemplate=\App\YmlExport\XmlTemplate::fromSettings(SettingsRepository::get());
+    \App\YmlExport\XmlTemplate::compile($convertedTemplate['text'],$convertedTemplate['variables']);
+    $settingsBefore=SettingsRepository::get();
+    $save($converted,['template'=>$convertedTemplate]);
+    $xml=$build();$offer=$xml->shop->offers->offer;
+    ensureXml((string)$offer['id']==='FILE-SKU'&&(string)$offer->quantity==='10','Converted template retains file ID and mapped stock');
+    ensureXml(count($offer->outlets->outlet)===3,'Converted template retains real and virtual warehouses');
+    $previewFeed=['id'=>0,'token'=>bin2hex(random_bytes(16)),'warehouse_ids'=>$warehouseIds];
+    $preview=FeedBuilder::buildFeed($previewFeed,SettingsRepository::get(),null,true);$paths[]=$preview['path'];
+    ensureXml(!is_file(FeedBuilder::path($previewFeed['token']))&&$preview['offers']===1,'Dry preview does not replace a live feed');
+
     $tree[]=['key'=>'custom','parent'=>'offer','kind'=>'block','name'=>'custom','enabled'=>true,'repeat'=>'once'];
     $tree[]=['key'=>'text','parent'=>'custom','kind'=>'tag','name'=>'label','enabled'=>true,'source'=>['type'=>'constant','ref'=>'Text <& " escaped']];
     $tree[]=['key'=>'attr','parent'=>'custom','kind'=>'attribute','name'=>'code','enabled'=>true,'source'=>['type'=>'column','ref'=>'A']];

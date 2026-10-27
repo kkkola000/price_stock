@@ -68,6 +68,8 @@ final class SettingsRepository
         $row['offer_mapping_array'] = XmlMapping::upgrade($mapping, json_decode((string) $row['outlets'], true) ?: self::DEFAULT_OUTLETS);
         $row['outlets_array'] = json_decode((string) $row['outlets'], true) ?: self::DEFAULT_OUTLETS;
 
+        $template=$row['outlets_array']['template'] ?? null;
+        $row['template_config']=is_array($template)?$template:XmlTemplate::fromSettings($row);
         return $row;
     }
 

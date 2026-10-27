@@ -18,6 +18,7 @@ use App\YmlExport\UploadImporter;
 use App\YmlExport\UploadRepository;
 use App\YmlExport\WarehouseRepository;
 use App\YmlExport\XmlMapping;
+use App\YmlExport\XmlTemplate;
 
 /**
  * Раздел «Выгрузка YML» — дополнение к админ-панели.
@@ -386,46 +387,22 @@ function handleSettingsSave(): void
 {
     $settings = SettingsRepository::get();
 
-    $rules = [];
-    $errors = [];
-    $parents = (array) ($_POST['map_parent'] ?? []);
-    $keys = (array) ($_POST['map_key'] ?? []);
-    foreach ((array) ($_POST['map_name'] ?? []) as $i=>$rawName) {
-        $rules[] = [
-            'key'=>(string)($keys[$i] ?? 'node_'.$i),
-            'parent'=>(string)($parents[$i] ?? 'offer'),
-            'name'=>trim((string)$rawName),
-            'enabled'=>isset($_POST['map_enabled'][$i]),
-            'kind'=>(string)($_POST['map_kind'][$i] ?? 'tag'),
-            'repeat'=>(string)($_POST['map_repeat'][$i] ?? 'once'),
-            'source'=>XmlMapping::sourceFromForm((string)($_POST['map_type'][$i] ?? 'file'), trim((string)($_POST['map_ref'][$i] ?? '')), (string)($_POST['map_extra'][$i] ?? '')),
-        ];
+    $rules=$settings['offer_mapping_array'];
+    $outlets=$settings['outlets_array'];
+    $variables=[];$errors=[];
+    foreach((array)($_POST['var_name']??[])as $i=>$name) {
+        $type=(string)($_POST['var_type'][$i]??'constant');
+        $variables[]=['name'=>trim((string)$name),'source'=>XmlTemplate::sourceFromForm($type,trim((string)($_POST['var_ref'][$i]??'')),(string)($_POST['var_extra'][$i]??''))];
     }
-    try { XmlMapping::validate($rules); } catch (Throwable $exception) { $errors[]=$exception->getMessage(); }
-
-    $outletsInput = (array) ($_POST['outlets'] ?? []);
-    $xmlName = static fn (string $v, string $default): string =>
-        preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/', $v) ? $v : $default;
-
-    $outlets = [
-        'enabled'    => isset($outletsInput['enabled']),
-        'parent'     => $xmlName(trim((string) ($outletsInput['parent'] ?? '')), 'outlets'),
-        'tag'        => $xmlName(trim((string) ($outletsInput['tag'] ?? '')), 'outlet'),
-        'stock_attr' => $xmlName(trim((string) ($outletsInput['stock_attr'] ?? '')), 'instock'),
-        'name_attr'  => $xmlName(trim((string) ($outletsInput['name_attr'] ?? '')), 'warehouse_name'),
-    ];
-
-    foreach (['root_name'=>'yml_catalog','shop_name'=>'shop','offers_name'=>'offers','offer_name'=>'offer'] as $key=>$default) {
-        $value=trim((string)($outletsInput[$key] ?? $default));
-        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_.\-]*$/',$value)) $errors[]='Некорректное имя XML: '.$value;
-        $outlets[$key]=$value;
-    }
+    $template=['text'=>(string)($_POST['xml_template']??''),'variables'=>$variables];
+    try {XmlTemplate::compile($template['text'],$variables);}catch(Throwable $exception){$errors[]=$exception->getMessage();}
+    $outlets['template']=$template;
     $draft = array_merge($settings, [
         'shop_name'=>trim((string)($_POST['shop_name']??'')),
         'shop_company'=>trim((string)($_POST['shop_company']??'')),
         'shop_url'=>trim((string)($_POST['shop_url']??'')),
         'currency'=>trim((string)($_POST['currency']??'')),
-        'offer_mapping_array'=>$rules, 'outlets_array'=>$outlets,
+        'offer_mapping_array'=>$rules, 'outlets_array'=>$outlets, 'template_config'=>$template,
         'only_confirmed'=>isset($_POST['only_confirmed'])?1:0,
         'skip_zero_stock'=>isset($_POST['skip_zero_stock'])?1:0,
         'oldprice_only_higher'=>isset($_POST['oldprice_only_higher'])?1:0,
@@ -454,10 +431,32 @@ function handleSettingsSave(): void
         $seenPatterns[$key] = true;
         $stockRows[] = ['pattern' => $pattern, 'qty' => max(0, (int) ($stockQtys[$i] ?? 0))];
     }
+    $isCheck=isset($_POST['check_template']);
+    if($errors===[]) {
+        try {
+            $feeds=FeedRepository::list();
+            $selected=null;
+            foreach($feeds as $feed)if((int)$feed['id']===(int)($_POST['preview_feed_id']??0))$selected=$feed;
+            $selected=$selected??($feeds[0]??null);
+            if($selected!==null) {
+                $previewSettings=$draft;
+                if($isCheck)$previewSettings['preview_product_id']=max(0,(int)($_POST['preview_product_id']??0));
+                $previewMap=array_map(static fn($row)=>['pattern'=>trim((string)preg_replace('/\s+/u',' ',str_replace('ё','е',mb_strtolower($row['pattern'],'UTF-8')))),'qty'=>$row['qty']],$stockRows);
+                $preview=FeedBuilder::buildFeed($selected,$previewSettings,$previewMap,true);
+                try {$truncated=filesize($preview['path'])>16000;$xml=(string)file_get_contents($preview['path'],false,null,0,16000);}finally{@unlink($preview['path']);}
+                $_SESSION['yml_template_preview']=['xml'=>$xml,'truncated'=>$truncated,'offers'=>$preview['offers'],'feed'=>(int)$selected['id'],'product'=>(int)($_POST['preview_product_id']??0)];
+            } else $_SESSION['yml_template_preview']=['xml'=>'','offers'=>0,'feed'=>0,'product'=>0];
+        }catch(Throwable $exception){$errors[]=$exception->getMessage();}
+    }
     if ($errors !== []) {
         $_SESSION['yml_settings_draft']=['settings'=>$draft,'stocks'=>$stockRows];
         foreach ($errors as $error) flash('error',$error);
         flash('error','Настройки не сохранены. Исправьте ошибки; действующий фид не изменён.');
+        redirect('yml.php?tab=settings');
+    }
+    if($isCheck) {
+        $_SESSION['yml_settings_draft']=['settings'=>$draft,'stocks'=>$stockRows];
+        flash('success','Шаблон корректен. Предпросмотр обновлён; настройки и действующие фиды не изменены.');
         redirect('yml.php?tab=settings');
     }
     $pdo=Db::pdo();
@@ -490,6 +489,8 @@ if ($tab === 'settings' && isset($_SESSION['yml_settings_draft'])) {
     $stockMapRows=$_SESSION['yml_settings_draft']['stocks'];
     unset($_SESSION['yml_settings_draft']);
 }
+$templatePreview=$tab==='settings'?($_SESSION['yml_template_preview']??null):null;
+if($tab==='settings')unset($_SESSION['yml_template_preview']);
 if ($tab === 'settings' && isset($_GET['add_stock'])) {
     $stockMapRows[] = ['pattern' => '', 'qty' => 0]; // пустая строка по кнопке «+ Добавить соответствие»
 }
@@ -1058,43 +1059,34 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
 
 <?php elseif ($tab === 'settings'): ?>
   <!-- ================= Настройка фида ================= -->
-  <form method="post">
+  <form method="post" id="yml-template-form">
     <?= Csrf::field() ?>
     <input type="hidden" name="action" value="settings-save">
 
+    <?php foreach(['shop_name','shop_company','shop_url','currency'] as $field): ?><input type="hidden" name="<?= e($field) ?>" value="<?= e((string)$settings[$field]) ?>"><?php endforeach; ?>
     <div class="card">
-      <h2 class="card__title">Магазин (блок &lt;shop&gt;)</h2>
-      <div class="grid-3">
-        <label class="field"><span class="field__label">Название</span>
-          <input class="input" name="shop_name" value="<?= e((string) $settings['shop_name']) ?>"></label>
-        <label class="field"><span class="field__label">Компания</span>
-          <input class="input" name="shop_company" value="<?= e((string) $settings['shop_company']) ?>"></label>
-        <label class="field"><span class="field__label">Ссылка</span>
-          <input class="input" name="shop_url" value="<?= e((string) $settings['shop_url']) ?>"></label>
-      </div>
+      <div class="toolbar"><h2 class="card__title">Значения для шаблона</h2><button type="button" class="btn btn--primary" id="template-add-variable">+ Добавить значение</button></div>
+      <p class="card__hint">Задайте переменные и вставляйте их в структуру XML.</p>
+      <div class="table-wrap"><table class="table table--compact" id="template-variables"><thead><tr><th>Значение / переменная</th><th>Источник</th><th>Поле / константа</th><th></th></tr></thead><tbody>
+        <?php foreach($settings['template_config']['variables'] as $i=>$variable) {require APP_ROOT.'/app/Views/admin/template_variable.php';} ?>
+      </tbody></table></div>
+      <p class="field__hint">Источники: Файл, Витрина, Константа. «Текущий склад» доступен только в повторении складов. Системная переменная {{дата_фида}} подставляет дату сборки.</p>
+      <template id="template-variable-row"><?php $i='__INDEX__';$variable=['name'=>'','source'=>['type'=>'constant','ref'=>'']];require APP_ROOT.'/app/Views/admin/template_variable.php'; ?></template>
     </div>
-
     <div class="card">
-      <h2 class="card__title">Конструктор YML</h2>
-      <p class="card__hint">Добавляйте теги, атрибуты и вложенные блоки. Вложенность показана отступами. Родитель и тип элемента меняются через «Настроить элемент»; порядок — стрелками. Изменения применяются после сохранения. Для постоянных значений выберите источник «Константа».</p>
-      <?php $xmlNodes=$settings['offer_mapping_array']; ?>
-      <div class="table-wrap"><table class="table table--compact xml-tree" id="xml-tree">
-        <thead><tr><th>Вкл.</th><th>Элемент</th><th>Имя в XML</th><th>Источник</th><th>Поле / значение</th><th>Действия</th></tr></thead>
-        <tbody>
-          <?php foreach (['_catalog'=>['root_name','yml_catalog'], '_shop'=>['shop_name','shop'], '_offers'=>['offers_name','offers'], 'offer'=>['offer_name','offer']] as $treeKey=>[$key,$default]): ?>
-          <tr data-xml-wrapper="<?= e($treeKey) ?>"><td></td><td class="xml-tree-element"><div class="xml-tree-label"><button type="button" data-xml-collapse aria-label="Свернуть блок" aria-expanded="true">⌄</button><span data-xml-label><?= e((string)($settings['outlets_array'][$key]??$default)) ?></span><?php if ($treeKey==='offer'): ?><span class="xml-repeat-label">Для каждого товара</span><?php endif; ?></div></td><td><input class="input mono" name="outlets[<?= e($key) ?>]" value="<?= e((string)($settings['outlets_array'][$key]??$default)) ?>" aria-label="Имя блока <?= e($default) ?>"></td><td class="muted">—</td><td class="muted">—</td><td></td></tr>
-          <?php endforeach; ?>
-          <?php foreach ($xmlNodes as $i=>$node) { require APP_ROOT.'/app/Views/admin/xml_node.php'; } ?>
-        </tbody>
-      </table></div>
-      <div class="form__actions">
-        <button type="button" class="btn btn--ghost" data-xml-add="tag">+ Добавить тег</button>
-        <button type="button" class="btn btn--ghost" data-xml-add="attribute">+ Добавить атрибут</button>
-        <button type="button" class="btn btn--ghost" data-xml-add="block">+ Вложенный блок</button>
+      <h2 class="card__title">Структура YML</h2>
+      <div class="form__actions template-toolbar">
+        <select class="input" id="template-insert-variable" aria-label="Переменная для вставки"><option value="">Выберите переменную</option></select>
+        <button type="button" class="btn btn--ghost" id="template-insert">+ Вставить переменную</button>
+        <button type="button" class="btn btn--ghost" data-template-loop="warehouse">+ Повторение по складам</button>
+        <button type="button" class="btn btn--ghost" data-template-loop="product">+ Повторение товаров</button>
       </div>
-      <p class="field__hint">Выбирайте поля из списка: «Артикул», «Цена», «Остаток с учётом соответствий», «Название склада». Источники — «Файл», «Витрина» или «Константа». В поле выберите значение; для «Столбец файла» укажите букву A, B, AA.</p>
-      <p class="field__hint">Поля витрины: price, promo_price, effective_price (промоцена, иначе обычная), name, sku, stock_text. Поля файла: sku, name, price, oldprice, min_price. Столбец файла: A, B, AA.</p>
-      <template id="xml-node-template"><?php $i='__INDEX__'; $node=['key'=>'__KEY__','kind'=>'tag','name'=>'new_tag','parent'=>'offer','enabled'=>true,'repeat'=>'once','source'=>['type'=>'constant','ref'=>'']]; require APP_ROOT.'/app/Views/admin/xml_node.php'; ?></template>
+      <p class="field__hint">Вставка в место курсора. Выделенный текст можно обернуть повторением. Для каждого товара нужен один блок повторения; склады — внутри него.</p>
+      <div class="template-editor">
+        <pre class="template-lines" aria-hidden="true"></pre><pre class="template-highlight" aria-hidden="true"></pre>
+        <textarea name="xml_template" id="xml-template" spellcheck="false" wrap="off" aria-label="Структура YML"><?= e($settings['template_config']['text']) ?></textarea>
+      </div>
+      <p class="muted small">Проверка XML и переменных выполняется кнопкой «Проверить шаблон». Данные подставляются с безопасным XML-экранированием.</p>
     </div>
 
     <div class="card">
@@ -1102,7 +1094,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <p>Основной источник — <b>витрина, сопоставленный товар</b>. Число передаётся напрямую; текстовый остаток — по таблице соответствий ниже.</p>
       <p class="muted small">Если остаток витрины не определён: остаток из файла склада → соответствия текста файла → запасное значение. Виртуальные склады используют постоянный остаток из своих настроек.</p>
       <p class="muted small">Склады выбираются для каждой ссылки во вкладке «Готовый фид». Блок «Для каждого склада» повторяется для этих складов.</p>
-      <label class="field field--narrow"><span class="field__label">Валюта фида (пусто — без блока currencies)</span><input class="input" name="currency" value="<?= e((string)$settings['currency']) ?>"></label>
+
     </div>
 
     <div class="card table-wrap">
@@ -1114,7 +1106,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       </p>
       <table class="table table--compact">
         <thead>
-          <tr><th>Значение из файла</th><th style="width:170px">Передавать количество</th><th style="width:90px"></th></tr>
+          <tr><th>Остаток на витрине / в файле</th><th style="width:170px">Передавать количество</th><th style="width:90px"></th></tr>
         </thead>
         <tbody>
         <?php if ($stockMapRows === []): ?>
@@ -1124,7 +1116,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
           <tr>
             <td><input class="input" name="stock_pattern[<?= $i ?>]" maxlength="190" value="<?= e((string) $stockRow['pattern']) ?>" placeholder="Более 5"></td>
             <td><input class="input" type="number" min="0" name="stock_qty[<?= $i ?>]" value="<?= (int) $stockRow['qty'] ?>"></td>
-            <td><label class="check-inline" style="margin:0"><input type="checkbox" name="stock_delete[<?= $i ?>]"> <span class="muted small">удалить</span></label></td>
+            <td><button type="button" class="btn btn--small btn--danger" data-remove-stock aria-label="Удалить соответствие">×</button></td>
           </tr>
         <?php endforeach; ?>
         </tbody>
@@ -1136,7 +1128,7 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         </label>
       </div>
       <div class="form__actions" style="padding:0 18px 18px">
-        <button class="btn btn--ghost" name="add_stock_row" value="1">+ Добавить соответствие</button>
+        <button type="button" class="btn btn--ghost" id="template-add-stock">+ Добавить соответствие</button>
       </div>
     </div>
 
@@ -1147,15 +1139,23 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <label class="check-inline"><input type="checkbox" name="oldprice_only_higher"<?= chk((int) $settings['oldprice_only_higher'] === 1) ?>> oldprice выводить, только если больше price</label>
       <div class="form__actions">
         <button class="btn btn--primary">Сохранить настройки</button>
-        <button class="btn btn--ghost" name="check_xml" value="1">Сохранить и проверить YML</button>
+        <button class="btn btn--ghost" name="check_template" value="1">Проверить шаблон</button>
       </div>
     </div>
   </form>
 
   <div class="card">
-    <h2 class="card__title">Предпросмотр сохранённого XML</h2>
-    <p class="card__hint">Первые строки основного фида. Чтобы увидеть изменения, сохраните настройки. Для остальных ссылок используйте вкладку «Готовый фид».</p>
-    <?php if ($feedPreview !== ''): ?><pre class="feed-preview"><?= e($feedPreview) ?></pre><?php else: ?><p class="muted">Сохраните настройки и загрузите сопоставленные товары для предпросмотра.</p><?php endif; ?>
+    <h2 class="card__title">Предпросмотр готового XML</h2>
+    <div class="form__actions">
+      <label>Фид <select class="input" name="preview_feed_id" form="yml-template-form"><?php foreach($feeds as $feed): ?><option value="<?= (int)$feed['id'] ?>"<?= sel((int)$feed['id'],(int)($templatePreview['feed']??$previewFeedId)) ?>><?= e($feed['name']) ?></option><?php endforeach; ?></select></label>
+      <label>Товар для примера <select class="input" name="preview_product_id" form="yml-template-form"><option value="0">Все товары выбранного фида</option><?php foreach(\App\Models\ProductRepository::search(['per_page'=>96])['items'] as $product): ?><option value="<?= (int)$product['id'] ?>"<?= sel((int)$product['id'],(int)($templatePreview['product']??0)) ?>><?= e($product['sku'].' — '.$product['name']) ?></option><?php endforeach; ?></select></label>
+      <button class="btn btn--ghost" name="check_template" value="1" form="yml-template-form">Проверить шаблон</button>
+    </div>
+    <?php if($templatePreview!==null): ?>
+      <p class="<?= $templatePreview['offers']>0?'template-status':'muted' ?>"><?= $templatePreview['offers']>0?'Шаблон корректен · Товаров: '.(int)$templatePreview['offers']:'Шаблон корректен. Для выбранного фида и товара нет подходящих сопоставлений.' ?></p>
+      <?php if(!empty($templatePreview['truncated'])): ?><p class="muted small">Показаны первые 16 КБ XML. Для подробного примера выберите один товар.</p><?php endif; ?>
+      <pre class="feed-preview"><?= e($templatePreview['xml']) ?></pre>
+    <?php else: ?><p class="muted">Нажмите «Проверить шаблон»: предпросмотр использует текущий текст, переменные и соответствия остатков без сохранения настроек.</p><?php endif; ?>
   </div>
 
 <?php else: ?>

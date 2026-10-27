@@ -99,120 +99,79 @@
   }
 })();
 
-/* Visual XML tree; form names and persisted mapping values remain unchanged. */
+/* XML template editor: local insertion and highlighting; server validates before writing. */
 (function () {
-  var table = document.getElementById('xml-tree');
-  if (!table) return;
-  var body = table.tBodies[0], serial = Date.now(), collapsed = new Set();
-  var roots = {_catalog: null, _shop: '_catalog', _offers: '_shop', offer: '_offers'};
+  var editor = document.getElementById('xml-template'), table = document.getElementById('template-variables');
+  if (!editor || !table) return;
+  var body = table.tBodies[0], serial = Date.now(), cursor = 0, end = 0;
   var choices = {
-    file: {sku:'Артикул',name:'Название',price:'Цена',oldprice:'Старая цена',min_price:'Минимальная цена',stock:'Суммарный остаток',warehouse_name:'Название склада',__column__:'Столбец файла (A, B, AA)'},
-    catalog: {sku:'Артикул',name:'Название',price:'Цена',promo_price:'Промоцена',effective_price:'Промоцена, иначе обычная цена',price_text:'Цена как на витрине',promo_price_text:'Промоцена как на витрине',stock:'Остаток с учётом соответствий',total_stock:'Суммарный остаток',raw_stock:'Числовой остаток без соответствий',stock_text:'Текст остатка'}
+    file: {sku:'Артикул',name:'Название',price:'Цена',oldprice:'Старая цена',min_price:'Минимальная цена',stock:'Суммарный остаток',warehouse_name:'Название приоритетного склада',__column__:'Столбец файла (A, B, AA)'},
+    catalog: {sku:'Артикул',name:'Название',price:'Цена',promo_price:'Промоцена',effective_price:'Промоцена, иначе обычная цена',price_text:'Цена как на витрине',promo_price_text:'Промоцена как на витрине',stock:'Остаток с соответствиями',total_stock:'Суммарный остаток',raw_stock:'Числовой остаток без соответствий',stock_text:'Текст остатка'},
+    warehouse: {name:'Название'}
   };
-  function rows() { return Array.from(body.querySelectorAll('[data-xml-node]')); }
-  function field(row, name) { return row.querySelector('[name^="' + name + '["]'); }
-  function key(row) { return row.dataset.xmlWrapper || field(row,'map_key').value; }
-  function parent(row) { return row.hasAttribute('data-xml-wrapper') ? roots[key(row)] : field(row,'map_parent').value; }
-  function refreshExtra(row) {
-    var extra = field(row,'map_extra'), value = field(row,'map_ref').value;
-    var needed = field(row,'map_type').value === 'file' && (value === '__column__' || value === '__constant__');
-    extra.hidden = !needed || field(row,'map_kind').value === 'block';
-    extra.placeholder = value === '__column__' ? 'Буква столбца, например A' : 'Постоянное значение';
-    extra.setAttribute('aria-label',value === '__column__' ? 'Буква столбца' : 'Постоянное значение');
-  }
-  function refreshField(row) {
-    var type = field(row,'map_type').value, old = field(row,'map_ref'), value = old.value;
+  function field(row,name) { return row.querySelector('[name^="var_' + name + '["]'); }
+  function refreshRow(row) {
+    var type = field(row,'type').value, old = field(row,'ref'), value = old.value;
     var previous = row.dataset.sourceType;
-    if (previous === type) { refreshExtra(row); return; }
-    row.xmlValues = row.xmlValues || {};
-    if (previous && previous !== type) {
-      row.xmlValues[previous] = value;
-      value = row.xmlValues[type] === undefined ? (choices[type] ? Object.keys(choices[type])[0] : '') : row.xmlValues[type];
+    if (previous !== type) {
+      row.sourceValues = row.sourceValues || {};
+      if (previous) { row.sourceValues[previous] = value; value = row.sourceValues[type] === undefined ? (choices[type] ? Object.keys(choices[type])[0] : '') : row.sourceValues[type]; }
+      var control;
+      if (choices[type]) {
+        control = document.createElement('select');
+        Object.entries(choices[type]).forEach(function (entry) { control.add(new Option(entry[1],entry[0])); });
+        if (!(value in choices[type])) control.add(new Option(value ? 'Сохранённое поле: ' + value : 'Выберите поле',value));
+        control.value = value;
+      } else { control = document.createElement('input'); control.value = value; control.placeholder = 'Постоянное значение'; }
+      control.name = old.name; control.className = 'input'; control.setAttribute('aria-label','Поле или константа');
+      old.replaceWith(control); row.dataset.sourceType = type;
     }
-    row.dataset.sourceType = type;
-    var control;
-    if (choices[type]) {
-      control = document.createElement('select');
-      Object.entries(choices[type]).forEach(function (entry) { control.add(new Option(entry[1],entry[0])); });
-      if (!(value in choices[type])) control.add(new Option(value ? 'Сохранённое поле: ' + value : 'Выберите поле',value));
-      control.value = value;
-    } else {
-      control = document.createElement('input'); control.value = value;
-      control.placeholder = type === 'column' ? 'Буква столбца, например A' : 'Постоянное значение';
-    }
-    control.name = old.name; control.className = 'input'; control.setAttribute('aria-label','Поле или значение');
-    old.replaceWith(control);
-    refreshExtra(row);
+    field(row,'extra').hidden = !(type === 'file' && field(row,'ref').value === '__column__');
+    field(row,'extra').placeholder = 'Буква столбца, например AA';
   }
   function refresh() {
-    var list = rows();
-    list.forEach(function (row) {
-      var own = key(row), select = field(row,'map_parent'), selected = select.value;
-      select.replaceChildren(new Option('Элемент товара (offer)','offer'),new Option('Корневой элемент','_catalog'),new Option('Магазин (shop)','_shop'),new Option('Список товаров (offers)','_offers'));
-      list.forEach(function (candidate) {
-        if (key(candidate) !== own && field(candidate,'map_kind').value === 'block') select.add(new Option(field(candidate,'map_name').value,key(candidate)));
-      });
-      select.value = selected;
-      if (!select.value) { select.add(new Option('Родитель недоступен: ' + selected,selected)); select.value = selected; }
-      var block = field(row,'map_kind').value === 'block';
-      field(row,'map_repeat').hidden = !block;
-      if (!block) field(row,'map_repeat').value = 'once';
-      refreshField(row);
-      field(row,'map_type').hidden = block; field(row,'map_ref').hidden = block;
-      row.querySelector('[data-xml-collapse]').hidden = !block;
-      row.querySelector('[data-xml-label]').textContent = (field(row,'map_kind').value === 'attribute' ? '@' : '') + field(row,'map_name').value;
-      row.querySelector('.xml-repeat-label').textContent = block && field(row,'map_repeat').value === 'warehouse' ? 'Для каждого склада' : '';
+    var picker = document.getElementById('template-insert-variable'), selected = picker.value;
+    picker.replaceChildren(new Option('Выберите переменную',''));
+    body.querySelectorAll('[data-template-variable]').forEach(function (row) {
+      refreshRow(row); var name = field(row,'name').value.trim(); if (name) picker.add(new Option(name,name));
     });
-    body.querySelectorAll('[data-xml-wrapper]').forEach(function (row) { row.querySelector('[data-xml-label]').textContent = row.querySelector('input').value; });
-    var all = Array.from(body.children), byKey = new Map(all.map(function (row) { return [key(row),row]; })), used = new Set(), ordered = [];
-    function append(row, depth, hidden) {
-      if (used.has(key(row))) return;
-      used.add(key(row)); ordered.push(row); row.hidden = hidden;
-      row.style.setProperty('--xml-depth',Math.min(depth,16));
-      var toggle = row.querySelector('[data-xml-collapse]');
-      toggle.textContent = collapsed.has(key(row)) ? '›' : '⌄'; toggle.setAttribute('aria-expanded',String(!collapsed.has(key(row))));
-      all.filter(function (child) { return parent(child) === key(row); }).sort(function (a,b) { return Number(a.hasAttribute('data-xml-wrapper')) - Number(b.hasAttribute('data-xml-wrapper')); }).forEach(function (child) { append(child,depth+1,hidden || collapsed.has(key(row))); });
-    }
-    append(byKey.get('_catalog'),0,false);
-    all.forEach(function (row) { if (!used.has(key(row))) append(row,0,false); });
-    ordered.forEach(function (row,index) { if (body.children[index] !== row) body.insertBefore(row,body.children[index] || null); });
+    picker.add(new Option('Дата сборки (системная)','дата_фида')); picker.value = selected;
   }
-  document.querySelectorAll('[data-xml-add]').forEach(function (button) {
-    button.addEventListener('click',function () {
-      var index = 'n' + (++serial);
-      var html = document.getElementById('xml-node-template').innerHTML.replaceAll('__INDEX__',index).replaceAll('__KEY__',index);
-      body.insertAdjacentHTML('beforeend',html);
-      var row = body.lastElementChild;
-      field(row,'map_kind').value = button.dataset.xmlAdd;
-      field(row,'map_name').value = button.dataset.xmlAdd === 'attribute' ? 'new_attribute' : button.dataset.xmlAdd === 'block' ? 'new_block' : 'new_tag';
-      refresh(); field(row,'map_name').focus();
+  function escaped(text) { return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function paint() {
+    var highlighted = escaped(editor.value).replace(/(\{\{[^{}]*\}\}|\{%[\s\S]*?%\}|&lt;[^\n]*?&gt;)/g,function (token) {
+      if (token.startsWith('&lt;')) return '<span class="template-tag">' + token.replace(/(\{\{[^{}]*\}\})/g,'<span class="template-variable">$1</span>') + '</span>';
+      return '<span class="' + (token.startsWith('{{') ? 'template-variable' : 'template-loop') + '">' + token + '</span>';
     });
+    editor.parentElement.querySelector('.template-highlight').innerHTML = highlighted + '\n';
+    editor.parentElement.querySelector('.template-lines').textContent = editor.value.split('\n').map(function (_,i) { return i+1; }).join('\n');
+  }
+  function insert(text) { editor.focus(); editor.setSelectionRange(cursor,end); editor.setRangeText(text,cursor,end,'end'); cursor = end = editor.selectionStart; paint(); }
+  ['keyup','click','select','blur'].forEach(function (event) { editor.addEventListener(event,function () { cursor=editor.selectionStart;end=editor.selectionEnd; }); });
+  editor.addEventListener('input',function () { cursor=end=editor.selectionStart;paint(); });
+  editor.addEventListener('scroll',function () { ['.template-highlight','.template-lines'].forEach(function (selector) { var pre=editor.parentElement.querySelector(selector);pre.scrollTop=editor.scrollTop;if(selector!=='.template-lines')pre.scrollLeft=editor.scrollLeft; }); });
+  editor.addEventListener('keydown',function (event) { if(event.key==='Tab'){event.preventDefault();cursor=editor.selectionStart;end=editor.selectionEnd;insert('  ');} });
+  document.getElementById('template-add-variable').addEventListener('click',function () {
+    body.insertAdjacentHTML('beforeend',document.getElementById('template-variable-row').innerHTML.replaceAll('__INDEX__','v'+(++serial)));
+    refresh();field(body.lastElementChild,'name').focus();
   });
   body.addEventListener('change',refresh);
   body.addEventListener('click',function (event) {
-    var button = event.target.closest('button'); if (!button) return;
-    var row = button.closest('tr');
-    if (button.hasAttribute('data-xml-collapse')) {
-      if (collapsed.has(key(row))) collapsed.delete(key(row)); else collapsed.add(key(row)); refresh(); return;
-    }
-    if (!row.hasAttribute('data-xml-node')) return;
-    if (button.hasAttribute('data-xml-remove')) {
-      var keys = new Set([key(row)]), changed = true;
-      while (changed) {
-        changed = false;
-        rows().forEach(function (candidate) { if (keys.has(parent(candidate)) && !keys.has(key(candidate))) { keys.add(key(candidate)); changed = true; } });
-      }
-      if (keys.size > 1 && !window.confirm('Удалить блок вместе с вложенными элементами?')) return;
-      rows().forEach(function (candidate) { if (keys.has(key(candidate))) candidate.remove(); });
-    } else if (button.dataset.xmlMove) {
-      var siblings = rows().filter(function (candidate) { return parent(candidate) === parent(row); });
-      var index = siblings.indexOf(row), other = siblings[index + (button.dataset.xmlMove === 'up' ? -1 : 1)];
-      if (other) {
-        if (button.dataset.xmlMove === 'up') body.insertBefore(row,other);
-        else body.insertBefore(other,row);
-      }
-    }
-    refresh();
+    var row=event.target.closest('[data-template-variable]');if(!row)return;
+    if(event.target.closest('[data-template-remove]')) {row.remove();refresh();}
+    else if(event.target.closest('[data-template-insert]')) {var name=field(row,'name').value.trim();if(name)insert('{{'+name+'}}');else field(row,'name').focus();}
   });
-  refresh();
+  document.getElementById('template-insert').addEventListener('click',function () {var name=document.getElementById('template-insert-variable').value;if(name)insert('{{'+name+'}}');});
+  document.querySelectorAll('[data-template-loop]').forEach(function (button) { button.addEventListener('click',function () {
+    var loop=button.dataset.templateLoop==='warehouse'?'склада':'товара', selected=editor.value.slice(cursor,end);
+    insert('{% для каждого '+loop+' %}\n'+selected+'\n{% конец %}');
+  }); });
+  var addStock=document.getElementById('template-add-stock');
+  if(addStock)addStock.addEventListener('click',function () {
+    var tbody=addStock.closest('.card').querySelector('tbody'), index='s'+(++serial), row=document.createElement('tr');
+    row.innerHTML='<td><input class="input" name="stock_pattern['+index+']" maxlength="190" placeholder="Более 5"></td><td><input class="input" type="number" min="0" name="stock_qty['+index+']" value="0"></td><td><button class="btn btn--small btn--danger" type="button" data-remove-stock>×</button></td>';
+    tbody.appendChild(row);row.querySelector('input').focus();
+  });
+  document.addEventListener('click',function(event){var button=event.target.closest('[data-remove-stock]');if(button)button.closest('tr').remove();});
+  refresh();paint();
 })();

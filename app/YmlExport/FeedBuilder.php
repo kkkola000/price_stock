@@ -42,17 +42,19 @@ final class FeedBuilder
      * @param array<string,mixed> $feed
      * @return array{offers:int,path:string}
      */
-    public static function buildFeed(array $feed): array
+    public static function buildFeed(array $feed, ?array $settingsOverride=null, ?array $stockMapOverride=null, bool $preview=false): array
     {
-        $settings = SettingsRepository::get();
+        $settings = $settingsOverride ?? SettingsRepository::get();
+        $template=$settings['outlets_array']['template']??null;
+        $compiled=is_array($template)?XmlTemplate::compile((string)$template['text'],(array)$template['variables']):null;
         $mapping = $settings['offer_mapping_array'];
-        XmlMapping::validate($mapping);
+        if ($compiled===null) XmlMapping::validate($mapping);
         $outlets = $settings['outlets_array'];
         foreach (['root_name','shop_name','offers_name','offer_name'] as $name) {
             if (isset($outlets[$name]) && !preg_match('/^[A-Za-z_][A-Za-z0-9_.-]*$/', $outlets[$name])) throw new RuntimeException('Некорректное имя XML.');
         }
         $onlyConfirmed = (int) $settings['only_confirmed'] === 1;
-        $stockMap = StockMapRepository::map();
+        $stockMap = $stockMapOverride ?? StockMapRepository::map();
         $stockFallback = (int) ($settings['stock_fallback'] ?? 0);
 
         $warehouseIds = array_values(array_filter(array_map('intval', $feed['warehouse_ids'] ?? [])));
@@ -92,12 +94,23 @@ final class FeedBuilder
             throw new RuntimeException('Не удалось создать каталог storage/feeds (проверьте права).');
         }
 
-        $file = self::path((string) $feed['token']);
+        $file = $preview ? APP_STORAGE.'/tmp/yml-preview-'.bin2hex(random_bytes(12)).'.xml' : self::path((string) $feed['token']);
         $temp = $file . '.tmp';
 
         $xml = new XMLWriter();
         $xml->openURI($temp);
         $xml->startDocument('1.0', 'UTF-8');
+        $offers = 0;
+        $productCache = [];
+        if ($compiled!==null) {
+            $eachProduct=static function(callable $emit)use($groups,$xml,$mapping,$outlets,$settings,&$productCache,$stockMap,$stockFallback,$virtualWarehouses,&$offers):void {
+                foreach($groups as $group) {
+                    if(!empty($settings['preview_product_id'])&&(int)$group[0]['product_id']!==(int)$settings['preview_product_id'])continue;
+                    if(self::buildOffer($xml,$group,$mapping,$outlets,$settings,$productCache,$stockMap,$stockFallback,$virtualWarehouses,$emit))$offers++;
+                }
+            };
+            XmlTemplate::write($xml,$compiled,(array)$template['variables'],$eachProduct,(int)$settings['oldprice_only_higher']===1);
+        } else {
         $xml->startElement((string) ($outlets['root_name'] ?? 'yml_catalog'));
         $rootDate = array_filter($mapping, static fn($node)=>!empty($node['enabled'])&&$node['parent']==='_catalog'&&$node['kind']==='attribute'&&$node['name']==='date');
         if ($rootDate===[]) $xml->writeAttribute('date', date('Y-m-d H:i'));
@@ -139,6 +152,7 @@ final class FeedBuilder
         $xml->endElement(); // offers
         $xml->endElement(); // shop
         $xml->endElement(); // yml_catalog
+        }
         $xml->endDocument();
         $xml->flush();
 
@@ -165,7 +179,7 @@ final class FeedBuilder
             throw new RuntimeException('Не удалось сохранить готовый XML.');
         }
 
-        FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
+        if (!$preview) FeedRepository::markBuilt((int) ($feed['id'] ?? 0), $offers);
 
         return ['offers' => $offers, 'path' => $file];
     }
@@ -201,7 +215,8 @@ final class FeedBuilder
         array &$productCache,
         array $stockMap,
         int $stockFallback,
-        array $virtualWarehouses
+        array $virtualWarehouses,
+        ?callable $consume=null
     ): bool {
         // Позиции склада могли быть удалены после сопоставления — такие строки пропускаем.
         $group = array_values(array_filter($group, static fn (array $row): bool => $row['item_sku_live'] !== null));
@@ -262,6 +277,7 @@ final class FeedBuilder
             $context = $warehouse !== null && in_array($source['type'] ?? '', ['field','column'], true) ? $warehouse : $primary;
             return self::resolveSource($source, $context, $group, $totalStock, $productCache);
         };
+        if ($consume!==null) { $consume($resolve,$warehouseContexts); return true; }
         $xml->startElement((string) ($outlets['offer_name'] ?? 'offer'));
         XmlMapping::write($xml, $mapping, $resolve, $warehouseContexts, 'offer', null, (int)$settings['oldprice_only_higher']===1);
         $xml->endElement();
@@ -288,6 +304,7 @@ final class FeedBuilder
 
         switch ($type) {
             case 'field':
+                if ($ref === 'warehouse_name') return (string)($primary['warehouse_name']??'');
                 if ($ref === 'stock') {
                     return (string) $totalStock;
                 }
