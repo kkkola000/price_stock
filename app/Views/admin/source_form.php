@@ -174,13 +174,22 @@ $ymlDefaults = SourceRepository::defaultYmlMapping();
     <h2 class="card__title">Маппинг полей</h2>
     <p class="card__hint js-type-block" data-type="excel csv">
       Укажите, из какого столбца брать каждое поле: буква (<b>A</b>, <b>B</b>, <b>AA</b>) или номер (<b>1</b>, <b>2</b>).
-      Заполнять все поля не обязательно — оставьте пустым то, чего нет в прайсе.
+      <br><b>Столбцы для объединения:</b> укажите буквы столбцов через запятую в нужном порядке. Значения объединяются через пробел.
+      Например, <code>B,F</code> → Коляска ANEX AX-123. Можно указать <code>B,F,G</code>. Пропуск пустых ячеек настраивается галочкой ниже.
+      <br>Заполнять все поля не обязательно — оставьте пустым то, чего нет в прайсе.
       Наличие показывается на витрине дословно, как написано у поставщика.
     </p>
     <p class="card__hint js-type-block" data-type="yml">
       Укажите названия тегов внутри <code>&lt;offer&gt;</code>. Для атрибутов используйте префикс <code>@</code>
       (например, <code>@available</code> или <code>@id</code>). Заполнять все поля не обязательно.
     </p>
+
+    <label class="check-inline js-type-block" data-type="excel csv">
+      <input type="hidden" name="mapping[_merge_skip_empty]" value="0">
+      <input type="checkbox" name="mapping[_merge_skip_empty]" value="1"<?= $mapVal('_merge_skip_empty', '1') !== '0' ? ' checked' : '' ?>>
+      Пропускать пустые ячейки при объединении
+    </label>
+    <p class="card__hint js-type-block" data-type="excel csv">Если галочка снята, место пустых ячеек сохраняется разделителями-пробелами.</p>
 
     <div class="grid-3">
       <?php foreach (SourceRepository::FIELDS as $field => $meta): ?>
@@ -189,7 +198,7 @@ $ymlDefaults = SourceRepository::defaultYmlMapping();
           <input class="input js-map-input"
                  type="text"
                  name="mapping[<?= e($field) ?>]"
-                 data-placeholder-table="буква или номер столбца"
+                 data-placeholder-table="B или B,F для объединения"
                  data-placeholder-yml="<?= e($ymlDefaults[$field] ?? '') ?>"
                  data-default-yml="<?= e($ymlDefaults[$field] ?? '') ?>"
                  value="<?= e($mapVal($field, $type === 'yml' ? ($ymlDefaults[$field] ?? '') : '')) ?>">

@@ -340,13 +340,15 @@ function handleUploadSave(bool $combined = false): void
         $mapping[$field] = trim((string) ($mappingInput[$field] ?? ''));
     }
 
+    $mapping['_merge_skip_empty'] = (string) ($mappingInput['_merge_skip_empty'] ?? '1') === '0' ? '0' : '1';
+
     if (in_array($type, ['excel', 'csv'], true)) {
         foreach (UploadRepository::FIELDS as $field => $label) {
             if ($mapping[$field] === '') {
                 continue;
             }
             try {
-                ColumnRef::toIndex($mapping[$field]);
+                ColumnRef::toIndices($mapping[$field]);
             } catch (Throwable $exception) {
                 $errors[] = $label . ': ' . $exception->getMessage();
             }
@@ -863,10 +865,18 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
         </label>
 
         <h3 class="a-subtitle">Маппинг полей</h3>
+        <p class="card__hint"><b>Столбцы для объединения (Excel / CSV):</b> укажите буквы столбцов через запятую в нужном порядке. Значения объединяются через пробел.
+          Например, <code>B,F</code> → Коляска ANEX AX-123. Можно указать <code>B,F,G</code>. Пропуск пустых ячеек настраивается галочкой ниже. Для YML укажите один тег.</p>
+        <label class="check-inline">
+          <input type="hidden" name="mapping[_merge_skip_empty]" value="0">
+          <input type="checkbox" name="mapping[_merge_skip_empty]" value="1"<?= (string) ($upMapping['_merge_skip_empty'] ?? '1') !== '0' ? ' checked' : '' ?>>
+          Пропускать пустые ячейки при объединении (Excel / CSV)
+        </label>
+        <p class="card__hint">Если галочка снята, место пустых ячеек сохраняется разделителями-пробелами.</p>
         <div class="grid-3">
           <?php foreach (UploadRepository::FIELDS as $field => $label): ?>
             <label class="field"><span class="field__label"><?= e($label) ?></span>
-              <input class="input" name="mapping[<?= e($field) ?>]" value="<?= e((string) ($upMapping[$field] ?? '')) ?>" placeholder="A или 1 (для YML — тег)">
+              <input class="input" name="mapping[<?= e($field) ?>]" value="<?= e((string) ($upMapping[$field] ?? '')) ?>" placeholder="B или B,F (для YML — тег)">
             </label>
           <?php endforeach; ?>
         </div>

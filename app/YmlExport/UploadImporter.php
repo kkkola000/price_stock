@@ -212,14 +212,17 @@ final class UploadImporter
 
             /** @var list<string> $raw */
             try {
-                return ColumnRef::value($raw, ColumnRef::toIndex($ref));
+                return ColumnRef::joinedValue($raw, ColumnRef::toIndices($ref), (string) ($mapping['_merge_skip_empty'] ?? '1') !== '0');
             } catch (Throwable) {
                 return '';
             }
         };
 
-        $name = ValueParser::text($get('name'), 500);
-        $sku  = ValueParser::text($get('sku'), 190);
+        $preserve = static fn (string $field): bool => !$isYml
+            && (string) ($mapping['_merge_skip_empty'] ?? '1') === '0'
+            && str_contains((string) ($mapping[$field] ?? ''), ',');
+        $name = ValueParser::text($get('name'), 500, !$preserve('name'));
+        $sku  = ValueParser::text($get('sku'), 190, !$preserve('sku'));
 
         if ($name === '' && $sku === '') {
             return null;

@@ -111,10 +111,10 @@ final class ValueParser
     }
 
     /** Название/артикул: чистим переносы и лишние пробелы. */
-    public static function text(string $value, int $maxLength): string
+    public static function text(string $value, int $maxLength, bool $collapseWhitespace = true): string
     {
         $value = str_replace(["\r", "\n", "\t", "\xc2\xa0"], ' ', $value);
-        $value = trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
+        $value = $collapseWhitespace ? trim(preg_replace('/\s+/u', ' ', $value) ?? $value) : (trim($value) === '' ? '' : $value);
 
         return mb_substr($value, 0, $maxLength, 'UTF-8');
     }

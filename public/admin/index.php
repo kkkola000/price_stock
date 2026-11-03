@@ -268,13 +268,15 @@ function handleSourceSave(): void
         $errors[] = 'Укажите корректную ссылку на файл (http:// или https://).';
     }
 
+    $mapping['_merge_skip_empty'] = (string) ($mappingInput['_merge_skip_empty'] ?? '1') === '0' ? '0' : '1';
+
     if (in_array($type, ['excel', 'csv'], true)) {
         foreach (SourceRepository::FIELDS as $field => $meta) {
             if ($mapping[$field] === '') {
                 continue;
             }
             try {
-                ColumnRef::toIndex($mapping[$field]);
+                ColumnRef::toIndices($mapping[$field]);
             } catch (Throwable $exception) {
                 $errors[] = $meta['label'] . ': ' . $exception->getMessage();
             }

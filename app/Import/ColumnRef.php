@@ -40,6 +40,41 @@ final class ColumnRef
         return $index - 1;
     }
 
+    /** Ordered column references for a mapped field; an empty mapping stays unset.
+     * @return list<int>
+     */
+    public static function toIndices(?string $ref): array
+    {
+        $ref = trim((string) $ref);
+        if ($ref === '') {
+            return [];
+        }
+        $indices = [];
+        foreach (explode(',', $ref) as $part) {
+            $index = self::toIndex($part);
+            if ($index === null) {
+                throw new InvalidArgumentException('Укажите буквы столбцов через запятую без пустых элементов, например B,F.');
+            }
+            $indices[] = $index;
+        }
+        return $indices;
+    }
+
+    /** @param list<string> $row
+     * @param list<int> $indices
+     */
+    public static function joinedValue(array $row, array $indices, bool $skipEmpty = true): string
+    {
+        $values = [];
+        foreach ($indices as $index) {
+            $value = self::value($row, $index);
+            if (!$skipEmpty || $value !== '') {
+                $values[] = $value;
+            }
+        }
+        return implode(' ', $values);
+    }
+
     /** Обратное преобразование — для подсказок в интерфейсе. */
     public static function toLetter(int $index): string
     {

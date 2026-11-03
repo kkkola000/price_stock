@@ -255,7 +255,7 @@ final class ImportService
     private static function mapRow(array $row, array $source, array &$errors, int $line = 0): ?array
     {
         $mapping = $source['mapping_array'] ?? [];
-        $get = static fn (string $field): string => ColumnRef::value($row, self::indexCache($mapping, $field));
+        $get = static fn (string $field): string => ColumnRef::joinedValue($row, self::indexCache($mapping, $field), (string) ($mapping['_merge_skip_empty'] ?? '1') !== '0');
 
         return self::buildProduct(
             $get('name'),
@@ -272,12 +272,12 @@ final class ImportService
     }
 
     /** Кэш разобранных ссылок на столбцы в пределах запроса. */
-    private static function indexCache(array $mapping, string $field): ?int
+    private static function indexCache(array $mapping, string $field): array
     {
         static $cache = [];
         $key = md5(json_encode($mapping, JSON_UNESCAPED_UNICODE) . '|' . $field);
         if (!array_key_exists($key, $cache)) {
-            $cache[$key] = ColumnRef::toIndex((string) ($mapping[$field] ?? ''));
+            $cache[$key] = ColumnRef::toIndices((string) ($mapping[$field] ?? ''));
         }
 
         return $cache[$key];
@@ -350,8 +350,11 @@ final class ImportService
     ): ?array {
         $mapping = $source['mapping_array'] ?? [];
 
-        $name = ValueParser::text($rawName, 500);
-        $sku  = ValueParser::text($rawSku, 190);
+        $preserve = static fn (string $field): bool => ($source['type'] ?? '') !== 'yml'
+            && (string) ($mapping['_merge_skip_empty'] ?? '1') === '0'
+            && str_contains((string) ($mapping[$field] ?? ''), ',');
+        $name = ValueParser::text($rawName, 500, !$preserve('name'));
+        $sku  = ValueParser::text($rawSku, 190, !$preserve('sku'));
 
         // Поля маппинга необязательные: название и артикул подстраховывают друг друга,
         // и только когда пусты оба — показывать в каталоге нечего.
