@@ -21,6 +21,8 @@ final class XlsxReader implements RowReader, SkipsHidden
     /** @var array<int,true> индексы скрытых столбцов (с нуля) */
     private array $hiddenColumns = [];
     private int $hiddenRows = 0;
+    private array $dateFormats = [];
+    private bool $date1904 = false;
 
     public function __construct(
         private readonly string $path,
@@ -53,6 +55,7 @@ final class XlsxReader implements RowReader, SkipsHidden
         try {
             $sheetPath   = $this->resolveSheetPath($zip);
             $sharedStr   = $this->readSharedStrings($zip);
+            $this->readDateFormats($zip);
             $sheetFile   = $this->extract($zip, $sheetPath);
 
             $this->hiddenRows = 0;
@@ -157,11 +160,12 @@ final class XlsxReader implements RowReader, SkipsHidden
 
             $ref  = (string) $reader->getAttribute('r');
             $type = (string) $reader->getAttribute('t');
+            $style = (int) $reader->getAttribute('s');
             $index = $ref !== '' ? $this->columnIndexFromRef($ref) : $autoIndex;
             $autoIndex = $index + 1;
 
             $cellXml = $reader->readOuterXml();
-            $value = $this->cellValue($cellXml, $type, $sharedStrings);
+            $value = $this->cellValue($cellXml, $type, $sharedStrings, $style);
 
             $cells[$index] = $value;
             $maxIndex = max($maxIndex, $index);
@@ -179,7 +183,7 @@ final class XlsxReader implements RowReader, SkipsHidden
     }
 
     /** @param list<string> $sharedStrings */
-    private function cellValue(string $cellXml, string $type, array $sharedStrings): string
+    private function cellValue(string $cellXml, string $type, array $sharedStrings, int $style): string
     {
         if ($type === 'inlineStr') {
             if (preg_match_all('~<t[^>]*>(.*?)</t>~s', $cellXml, $matches) > 0) {
@@ -193,12 +197,40 @@ final class XlsxReader implements RowReader, SkipsHidden
         }
         $raw = $this->decode($match[1]);
 
+        if (($type === '' || $type === 'n') && isset($this->dateFormats[$style])) {
+            return ExcelDateFormat::render($raw, $this->dateFormats[$style], $this->date1904) ?? $raw;
+        }
         return match ($type) {
             's'  => $sharedStrings[(int) $raw] ?? '',
             'b'  => $raw === '1' ? '1' : '0',
             'e'  => '',
             default => $raw,
         };
+    }
+
+    private function readDateFormats(ZipArchive $zip): void
+    {
+        $this->dateFormats = [];
+        $workbook = $zip->getFromName('xl/workbook.xml');
+        $this->date1904 = $workbook !== false && preg_match('/date1904=["\'](?:1|true)["\']/i', $workbook) === 1;
+        $styles = $zip->getFromName('xl/styles.xml');
+        if ($styles === false) return;
+        $reader = new XMLReader();
+        if (!$reader->XML($styles)) return;
+        $formats = ExcelDateFormat::BUILTIN;
+        $cellXfs = false; $index = 0;
+        while ($reader->read()) {
+            if ($reader->nodeType === XMLReader::ELEMENT && $reader->localName === 'numFmt') {
+                $formats[(int)$reader->getAttribute('numFmtId')] = (string)$reader->getAttribute('formatCode');
+            } elseif ($reader->localName === 'cellXfs') {
+                $cellXfs = $reader->nodeType === XMLReader::ELEMENT;
+            } elseif ($cellXfs && $reader->nodeType === XMLReader::ELEMENT && $reader->localName === 'xf') {
+                $id = (int)$reader->getAttribute('numFmtId');
+                if (isset($formats[$id])) $this->dateFormats[$index] = $formats[$id];
+                $index++;
+            }
+        }
+        $reader->close();
     }
 
     private function decode(string $value): string

@@ -49,6 +49,9 @@ final class XlsReader implements RowReader, SkipsHidden
     private array $sheets = [];
     private int $version = 0x0600;
     private string $encoding = 'CP1251';
+    private array $formats = ExcelDateFormat::BUILTIN;
+    private array $xfFormats = [];
+    private bool $date1904 = false;
 
     /** @var array<int,true> */
     private array $hiddenColumns = [];
@@ -151,6 +154,14 @@ final class XlsReader implements RowReader, SkipsHidden
                     65001   => 'UTF-8',
                     default => 'CP1251',
                 };
+            } elseif ($type === 0x0022) { // DATEMODE
+                $this->date1904 = $this->uint16($data, 0) === 1;
+            } elseif ($type === 0x00E0) { // XF: index of number format
+                $this->xfFormats[] = $this->uint16($data, 2);
+            } elseif ($type === 0x041E) { // FORMAT
+                $this->formats[$this->uint16($data, 0)] = $this->version >= 0x0600
+                    ? $this->longString($data, 2)
+                    : $this->decodeBytes(substr($data, 3, ord($data[2] ?? "\0")));
             } elseif ($type === self::BOUNDSHEET) {
                 $this->sheets[] = [
                     'name'     => $this->shortString($data, 6),
@@ -337,13 +348,13 @@ final class XlsReader implements RowReader, SkipsHidden
                 case self::NUMBER:
                     $row = $this->uint16($data, 0);
                     $col = $this->uint16($data, 2);
-                    $value = $this->formatNumber((float) unpack('e', substr($data, 6, 8))[1]);
+                    $value = $this->formatCell((float) unpack('e', substr($data, 6, 8))[1], $this->uint16($data, 4));
                     break;
 
                 case self::RK:
                     $row = $this->uint16($data, 0);
                     $col = $this->uint16($data, 2);
-                    $value = $this->formatNumber($this->rkValue(substr($data, 6, 4)));
+                    $value = $this->formatCell($this->rkValue(substr($data, 6, 4)), $this->uint16($data, 4));
                     break;
 
                 case self::MULRK:
@@ -352,8 +363,8 @@ final class XlsReader implements RowReader, SkipsHidden
                     $count = intdiv(strlen($data) - 6, 6);
                     // строка(2) + первый столбец(2), далее пары: индекс оформления(2) + число(4)
                     for ($i = 0; $i < $count; $i++) {
-                        $rows[$row][$first + $i] = $this->formatNumber(
-                            $this->rkValue(substr($data, 4 + $i * 6 + 2, 4))
+                        $rows[$row][$first + $i] = $this->formatCell(
+                            $this->rkValue(substr($data, 4 + $i * 6 + 2, 4)), $this->uint16($data, 4 + $i * 6)
                         );
                     }
                     $maxRow = max($maxRow, $row);
@@ -380,7 +391,7 @@ final class XlsReader implements RowReader, SkipsHidden
                             $value = ''; // ошибка или пусто
                         }
                     } else {
-                        $value = $this->formatNumber((float) unpack('e', $result)[1]);
+                        $value = $this->formatCell((float) unpack('e', $result)[1], $this->uint16($data, 4));
                     }
                     break;
 
@@ -516,6 +527,13 @@ final class XlsReader implements RowReader, SkipsHidden
         }
 
         return ($bits & 0x01) === 0x01 ? $value / 100 : $value;
+    }
+
+    private function formatCell(float $value, int $xf): string
+    {
+        $raw = $this->formatNumber($value);
+        $format = $this->formats[$this->xfFormats[$xf] ?? -1] ?? '';
+        return ExcelDateFormat::render($raw, $format, $this->date1904) ?? $raw;
     }
 
     /** Число в строку без экспоненты и лишних нулей — дальше его разбирает ValueParser. */

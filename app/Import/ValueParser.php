@@ -64,6 +64,12 @@ final class ValueParser
             }
         }
 
+        // Arrival dates are text, never a quantity (05.11 must not become 5).
+        if (preg_match('~^([0-9]{1,2})([./-])([0-9]{1,2})(?:\2([0-9]{2}|[0-9]{4}))?$~', $text, $date) === 1
+            && checkdate((int)$date[3], (int)$date[1], isset($date[4]) ? (strlen($date[4]) === 2 ? 2000 + (int)$date[4] : (int)$date[4]) : 2000)) {
+            return ['qty' => null, 'status' => 'in_stock', 'text' => $text];
+        }
+
         // Чистое число — это количество
         $numeric = str_replace(["\xc2\xa0", ' ', ','], ['', '', '.'], $text);
         $numeric = preg_replace('/^[>~≥+]+/u', '', $numeric) ?? $numeric;
