@@ -15,7 +15,8 @@
   var codeForm = document.getElementById('js-purchase-form');
   var codeInput = document.getElementById('purchase-code');
   var message = document.getElementById('js-purchase-message');
-  var unlocked = false, prices = {}, priceRequest = 0;
+  var unlocked = false, prices = {}, purchaseDetails = {}, priceRequest = 0;
+  var purchaseTotal = document.getElementById('js-orders-purchase-total');
 
   function orderItems(items) {
     return items.map(function (item) { return {id: item.id, name: item.name, qty: store.qtyOf(item)}; });
@@ -36,7 +37,7 @@
     return data;
   }
   function setAccess(value) {
-    unlocked = value; prices = {}; priceRequest++;
+    unlocked = value; prices = {}; purchaseDetails = {}; priceRequest++;
     showPriceBtn.classList.toggle('is-hidden', unlocked);
     hidePriceBtn.classList.toggle('is-hidden', !unlocked);
     codeForm.classList.add('is-hidden'); codeInput.value = '';
@@ -48,7 +49,7 @@
     try {
       var data = await api('prices', {items: JSON.stringify(orderItems(store.read()))});
       if (serial !== priceRequest || !unlocked) { return; }
-      prices = data.prices; render();
+      prices = data.prices; purchaseDetails = data.details; render();
     } catch (error) {
       if (serial !== priceRequest) { return; }
       setAccess(false); message.textContent = error.message;
@@ -82,6 +83,28 @@
   }
 
 
+  function money(cents, symbol) {
+    var whole = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return whole + (cents % 100 ? '.' + String(cents % 100).padStart(2, '0') : '') + ' ' + symbol;
+  }
+  function totalsHtml(items) {
+    if (!unlocked) { return ''; }
+    var sums = Object.create(null), symbols = Object.create(null), missing = 0;
+    items.forEach(function (item) {
+      var detail = purchaseDetails[String(item.id)];
+      if (!detail || detail.cents === null) { missing++; return; }
+      sums[detail.currency] = (sums[detail.currency] || 0) + detail.cents * store.qtyOf(item);
+      symbols[detail.currency] = detail.symbol;
+    });
+    var labels = Object.keys(sums).map(function (currency) { return money(sums[currency], symbols[currency]); });
+    return '<strong>Итого по закупке: ' + escapeHtml(labels.join(' + ') || '—') + '</strong>'
+      + (missing ? '<div class="order-item__purchase">Без закупочной цены: ' + missing + ' поз. Не включены в итог.</div>' : '');
+  }
+  function lineTotal(item) {
+    var detail = purchaseDetails[String(item.id)];
+    return detail && detail.cents !== null ? money(detail.cents * store.qtyOf(item), detail.symbol) : '—';
+  }
+
   function positionsLabel(count) {
     var mod10 = count % 10;
     var mod100 = count % 100;
@@ -109,6 +132,8 @@
     var groups = store.bySupplier();
     var total = store.count();
     var opened = openSupplierIds();
+    purchaseTotal.classList.toggle('is-hidden', !unlocked || total === 0);
+    purchaseTotal.innerHTML = totalsHtml(store.read());
 
     totalLabel.textContent = total === 0
       ? 'Список пуст'
@@ -135,7 +160,7 @@
            так на телефоне ничего не уезжает вбок. */
         return '<div class="order-item">'
           + '<div class="order-item__name">' + escapeHtml(item.name) + '</div>'
-          + (unlocked ? '<div class="order-item__purchase">Закупочная цена: ' + escapeHtml(prices[String(item.id)] || '—') + '</div>' : '')
+          + (unlocked ? '<div class="order-item__purchase">Закупочная цена: ' + escapeHtml(prices[String(item.id)] || '—') + ' · Сумма: ' + escapeHtml(lineTotal(item)) + '</div>' : '')
           + '<div class="order-item__row">'
           + (stock !== '' ? '<span class="order-item__stock">' + escapeHtml(stock) + '</span>' : '<span></span>')
           + '<div class="qty">'
@@ -160,6 +185,7 @@
         + '</summary>'
         + '<div class="order-group__body">'
         + '<div class="order-items">' + rows + '</div>'
+        + (unlocked ? '<div class="order-purchase-total">' + totalsHtml(group.items) + '</div>' : '')
         + '<div class="order-group__actions">'
         + '<button type="button" class="btn btn--primary js-download">Скачать</button>'
         + '<button type="button" class="btn btn--ghost js-clear">Очистить</button>'

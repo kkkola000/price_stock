@@ -402,7 +402,7 @@ final class ImportService
             'name'         => $name,
             'price'        => $price,
             'price_text'   => $priceText,
-            'purchase_price' => ValueParser::price($rawPurchasePrice),
+            'purchase_price' => ValueParser::purchasePrice($rawPurchasePrice),
             'purchase_price_text' => ValueParser::text($rawPurchasePrice, 190),
             'promo_price'  => ValueParser::price($rawPromoPrice),
             'promo_price_text' => ValueParser::text($rawPromoPrice, 190),

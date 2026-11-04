@@ -85,7 +85,7 @@ use App\Models\ProductRepository;
                   ? e(price_label((string) ($product['promo_price_text'] ?? ''), (float) $product['promo_price'], (string) $product['currency'])) : '—' ?>
             </td>
             <td data-label="Закупочная цена" class="num"><?= isset($product['purchase_price'])
-                ? e(price_label((string)($product['purchase_price_text']??''),(float)$product['purchase_price'],(string)$product['currency'])) : '—' ?></td>
+                ? e(price_label('',(float)$product['purchase_price'],(string)$product['currency'])) : '—' ?></td>
             <td data-label="Наличие">
               <?= e($product['stock_text'] !== '' ? $product['stock_text'] : '—') ?>
               <span class="muted small">(<?= e(ProductRepository::AVAILABILITY[$product['availability']]) ?>)</span>
@@ -121,7 +121,7 @@ use App\Models\ProductRepository;
                   ? e(price_label((string) ($product['promo_price_text'] ?? ''), (float) $product['promo_price'], (string) $product['currency'])) : '—' ?>
             </td>
           <td data-label="Закупочная цена" class="num"><?= isset($product['purchase_price'])
-              ? e(price_label((string)($product['purchase_price_text']??''),(float)$product['purchase_price'],(string)$product['currency'])) : '—' ?></td>
+              ? e(price_label('',(float)$product['purchase_price'],(string)$product['currency'])) : '—' ?></td>
           <td data-label="Наличие">
             <?= e(($product['stock_text'] ?? '') !== '' ? $product['stock_text'] : ProductRepository::AVAILABILITY[$product['availability']]) ?>
           </td>

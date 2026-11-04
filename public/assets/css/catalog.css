@@ -575,3 +575,4 @@ img { max-width: 100%; }
 .purchase-access form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .purchase-access__input { border: 1px solid #dfe3ee; border-radius: 10px; padding: 10px 12px; max-width: 100%; font: inherit; }
 .order-item__purchase { color: #657084; font-size: 14px; margin: 6px 0; overflow-wrap: anywhere; }
+.order-purchase-total { margin: 12px 0; padding: 12px 16px; background: #f0f3f9; border-radius: 12px; overflow-wrap: anywhere; }

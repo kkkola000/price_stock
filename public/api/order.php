@@ -20,24 +20,34 @@ try {
     $items=json_decode((string)($_POST['items']??'[]'),true,32,JSON_THROW_ON_ERROR);
     if(!is_array($items)||!array_is_list($items)||count($items)>10000)throw new InvalidArgumentException('Некорректный список заказа.');
     foreach($items as $item)if(!is_array($item)||!isset($item['id'])||!is_scalar($item['id']))throw new InvalidArgumentException('Некорректный товар.');
-    if($action==='prices')json_response(['ok'=>true,'prices'=>(object)OrderPurchasePrices::forIds(array_column($items,'id'))]);
+    if($action==='prices'){
+        $details=OrderPurchasePrices::detailsForIds(array_column($items,'id'));
+        json_response(['ok'=>true,'prices'=>(object)array_map(static fn(array $detail):string=>$detail['label'],$details),'details'=>(object)$details]);
+    }
     // Ignore client flags and prices: only the current server session controls the exported column.
     $unlocked=PurchaseAccess::allowed();
-    $prices=$unlocked?OrderPurchasePrices::forIds(array_column($items,'id')):[];
+    $details=$unlocked?OrderPurchasePrices::detailsForIds(array_column($items,'id')):[];
+    $summary=$unlocked?OrderPurchasePrices::totals($items,$details):[];
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="zakaz.csv"');
     $out=fopen('php://output','wb');fwrite($out,"\xEF\xBB\xBF");
-    $columns=['Товар','Количество'];if($unlocked)$columns[]='Закупочная цена';
+    $columns=['Товар','Количество'];if($unlocked){$columns[]='Закупочная цена';$columns[]='Сумма';$columns[]='Валюта';}
     fputcsv($out,$columns,';','"','');
     foreach($items as $item){
         $name=mb_substr((string)($item['name']??''),0,500);
         if(preg_match('/^[=+@\-\t\r]/u',$name))$name="'".$name;
         $row=[$name,max(1,min(9999,(int)($item['qty']??1)))];
         if($unlocked){
-            $cost=$prices[(string)(int)$item['id']]??'—';
-            $row[]=preg_match('/^[=+@\-\t\r]/u',$cost)?"'".$cost:$cost;
+            $detail=$details[(string)(int)$item['id']]??null;
+            $row[]=$detail===null||$detail['cents']===null?'—':OrderPurchasePrices::csvNumber($detail['cents']);
+            $row[]=$detail===null||$detail['cents']===null?'—':OrderPurchasePrices::csvNumber($detail['cents']*$row[1]);
+            $row[]=$detail['currency']??'';
         }
         fputcsv($out,$row,';','"','');
+    }
+    if($unlocked){
+        foreach($summary['totals'] as $currency=>$cents)fputcsv($out,['Итого','','',OrderPurchasePrices::csvNumber($cents),$currency],';','"','');
+        if($summary['missing']>0)fputcsv($out,['Без закупочной цены: '.$summary['missing'].' поз. (не включены в итог)','','','',''],';','"','');
     }
     fclose($out);exit;
 }catch(OverflowException $exception){json_response(['ok'=>false,'error'=>$exception->getMessage()],429);

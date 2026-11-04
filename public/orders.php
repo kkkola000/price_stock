@@ -51,6 +51,7 @@ $siteName = (string) Config::get('site_name', 'Каталог товаров');
     <p id="js-purchase-message" role="status" aria-live="polite"></p>
   </section>
 
+  <div id="js-orders-purchase-total" class="order-purchase-total is-hidden" aria-live="polite"></div>
   <div id="js-orders-list"></div>
 </main>
 

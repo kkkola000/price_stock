@@ -40,6 +40,24 @@ final class ValueParser
         return $price < 0 ? null : $price;
     }
 
+    /** Purchase price only: grouping separators are removed, decimals keep 1–2 digits. */
+    public static function purchasePrice(string $raw): ?float
+    {
+        $value = preg_replace('/[^0-9,.\-]/u', '', $raw) ?? '';
+        if ($value === '' || str_contains($value, '-')) return null;
+        // 77.900 / 1,234,567 are thousands; 77900,50 / 77.900,50 have decimals.
+        if (preg_match('/^[0-9]{1,3}([.,])[0-9]{3}(?:\1[0-9]{3})*$/', $value)) {
+            $value = str_replace(['.', ','], '', $value);
+        } elseif (preg_match('/([.,])([0-9]{1,2})$/', $value, $decimal)) {
+            $whole = substr($value, 0, -strlen($decimal[0]));
+            $value = str_replace(['.', ','], '', $whole) . '.' . $decimal[2];
+        } elseif (strpbrk($value, '.,') !== false) {
+            return null; // Ambiguous input must not silently become a different amount.
+        }
+        if (!is_numeric($value) || !is_finite((float)$value) || (float)$value > 999999999999.99) return null;
+        return round((float)$value, 2);
+    }
+
     /**
      * Остаток/наличие. Значение поставщика сохраняется дословно — именно оно
      * показывается на витрине («Есть в наличии», «Более 5», «3 шт»).
