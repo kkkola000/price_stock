@@ -58,6 +58,12 @@
   showPriceBtn.addEventListener('click', function () {
     codeForm.classList.remove('is-hidden'); codeInput.focus(); message.textContent = '';
   });
+  purchaseTotal.addEventListener('click', function (event) {
+    if (!event.target.closest('.js-total-unlock')) { return; }
+    codeForm.classList.remove('is-hidden');
+    codeForm.scrollIntoView({behavior: 'smooth', block: 'center'});
+    codeInput.focus(); message.textContent = '';
+  });
   codeForm.addEventListener('submit', async function (event) {
     event.preventDefault(); var button = codeForm.querySelector('button'); button.disabled = true;
     try {
@@ -87,7 +93,7 @@
     var whole = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     return whole + (cents % 100 ? '.' + String(cents % 100).padStart(2, '0') : '') + ' ' + symbol;
   }
-  function totalsHtml(items) {
+  function totalsHtml(items, grand) {
     if (!unlocked) { return ''; }
     var sums = Object.create(null), symbols = Object.create(null), missing = 0;
     items.forEach(function (item) {
@@ -97,7 +103,7 @@
       symbols[detail.currency] = detail.symbol;
     });
     var labels = Object.keys(sums).map(function (currency) { return money(sums[currency], symbols[currency]); });
-    return '<strong>Итого по закупке: ' + escapeHtml(labels.join(' + ') || '—') + '</strong>'
+    return '<strong>' + (grand ? 'Итого по всем позициям: ' : 'Итого по закупке: ') + escapeHtml(labels.join(' + ') || '—') + '</strong>'
       + (missing ? '<div class="order-item__purchase">Без закупочной цены: ' + missing + ' поз. Не включены в итог.</div>' : '');
   }
   function lineTotal(item) {
@@ -132,8 +138,10 @@
     var groups = store.bySupplier();
     var total = store.count();
     var opened = openSupplierIds();
-    purchaseTotal.classList.toggle('is-hidden', !unlocked || total === 0);
-    purchaseTotal.innerHTML = totalsHtml(store.read());
+    purchaseTotal.classList.toggle('is-hidden', total === 0);
+    purchaseTotal.innerHTML = unlocked ? totalsHtml(store.read(), true)
+      : '<strong>Итого по всем позициям</strong><p>Сумма по закупке скрыта. Введите код доступа.</p>'
+        + '<button type="button" class="btn btn--ghost js-total-unlock">Показать сумму</button>';
 
     totalLabel.textContent = total === 0
       ? 'Список пуст'

@@ -576,3 +576,5 @@ img { max-width: 100%; }
 .purchase-access__input { border: 1px solid #dfe3ee; border-radius: 10px; padding: 10px 12px; max-width: 100%; font: inherit; }
 .order-item__purchase { color: #657084; font-size: 14px; margin: 6px 0; overflow-wrap: anywhere; }
 .order-purchase-total { margin: 12px 0; padding: 12px 16px; background: #f0f3f9; border-radius: 12px; overflow-wrap: anywhere; }
+.order-purchase-total--grand { margin-top: 24px; border: 1px solid #dfe3ee; padding: 20px; }
+.order-purchase-total--grand > strong { display: block; font-size: 20px; }
