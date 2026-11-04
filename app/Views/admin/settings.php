@@ -23,3 +23,18 @@ $common=['Europe/Moscow'=>'Москва','Europe/Kaliningrad'=>'Калининг
     <button class="btn btn--primary">Сохранить часовой пояс</button>
   </form>
 </div>
+
+<div class="card">
+  <h2 class="card__title">Закупочные цены в заказе</h2>
+  <p>Доступ <?= App\Support\PurchaseAccess::configured() ? 'защищён кодом' : 'выключен: код не установлен' ?>.</p>
+  <form method="post" action="index.php?page=settings">
+    <?= Csrf::field() ?>
+    <input type="hidden" name="action" value="purchase-code">
+    <label class="field"><span class="field__label">Новый код доступа</span>
+      <input class="input" type="password" name="purchase_code" minlength="4" maxlength="128" autocomplete="new-password">
+      <span class="field__hint">От 4 до 128 символов. Код открывает закупочные цены только в заказе и его скачиваемой таблице. Смена кода сбрасывает доступ во всех сессиях.</span>
+    </label>
+    <label class="check-inline"><input type="checkbox" name="disable_purchase_code"> Выключить доступ к закупочным ценам</label>
+    <button class="btn btn--primary">Сохранить код доступа</button>
+  </form>
+</div>

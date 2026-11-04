@@ -4,7 +4,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/app/bootstrap.php';
 
 use App\Support\Config;
+use App\Support\Csrf;
 
+header('Cache-Control: no-store, private');
 $siteName = (string) Config::get('site_name', 'Каталог товаров');
 ?>
 <!doctype html>
@@ -37,6 +39,17 @@ $siteName = (string) Config::get('site_name', 'Каталог товаров');
   <p class="orders__hint" id="js-orders-hint">
     Списки формируются по поставщикам. Каждый можно скачать одним файлом или очистить.
   </p>
+
+  <section class="purchase-access" id="js-purchase-access" data-csrf="<?= e(Csrf::token()) ?>">
+    <button class="btn btn--ghost" type="button" id="js-purchase-show">Показать закупочные цены</button>
+    <button class="btn btn--ghost is-hidden" type="button" id="js-purchase-hide">Скрыть закупочные цены</button>
+    <form id="js-purchase-form" class="is-hidden">
+      <label for="purchase-code">Код доступа</label>
+      <input class="purchase-access__input" id="purchase-code" type="password" minlength="4" maxlength="128" autocomplete="off" required>
+      <button class="btn btn--primary" type="submit">Открыть</button>
+    </form>
+    <p id="js-purchase-message" role="status" aria-live="polite"></p>
+  </section>
 
   <div id="js-orders-list"></div>
 </main>

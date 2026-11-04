@@ -570,3 +570,8 @@ img { max-width: 100%; }
   .price-history__price { grid-template-columns: 70px minmax(0, 1fr) 12px minmax(0, 1fr); gap: 5px; font-size: 13px; }
   .price-history__prices { margin-top: 8px; }
 }
+
+.purchase-access { margin: 16px 0; }
+.purchase-access form { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.purchase-access__input { border: 1px solid #dfe3ee; border-radius: 10px; padding: 10px 12px; max-width: 100%; font: inherit; }
+.order-item__purchase { color: #657084; font-size: 14px; margin: 6px 0; overflow-wrap: anywhere; }

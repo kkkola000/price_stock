@@ -28,6 +28,7 @@ final class SourceRepository
         'sku'   => ['label' => 'Артикул / SKU'],
         'price' => ['label' => 'Цена'],
         'promo_price' => ['label' => 'Цена промо'],
+        'purchase_price' => ['label' => 'Закупочная цена'],
         'stock' => ['label' => 'Остаток/наличие'],
         'image' => ['label' => 'Фото (URL)'],
         'currency' => ['label' => 'Валюта (столбец)'],

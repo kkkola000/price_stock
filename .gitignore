@@ -16,3 +16,5 @@ storage/timezone.json
 
 storage/ozon-api*.json
 storage/ozon-api.lock
+
+storage/purchase-access.json

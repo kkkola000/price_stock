@@ -9,6 +9,78 @@
   var totalLabel = document.getElementById('js-orders-total');
   var clearAllBtn = document.getElementById('js-clear-all');
   var hint = document.getElementById('js-orders-hint');
+  var access = document.getElementById('js-purchase-access');
+  var showPriceBtn = document.getElementById('js-purchase-show');
+  var hidePriceBtn = document.getElementById('js-purchase-hide');
+  var codeForm = document.getElementById('js-purchase-form');
+  var codeInput = document.getElementById('purchase-code');
+  var message = document.getElementById('js-purchase-message');
+  var unlocked = false, prices = {}, priceRequest = 0;
+
+  function orderItems(items) {
+    return items.map(function (item) { return {id: item.id, name: item.name, qty: store.qtyOf(item)}; });
+  }
+  function request(action, fields) {
+    var body = new URLSearchParams();
+    body.set('action', action); body.set('csrf_token', access.getAttribute('data-csrf'));
+    Object.keys(fields || {}).forEach(function (key) { body.set(key, fields[key]); });
+    return fetch('api/order.php', {method: 'POST', credentials: 'same-origin', cache: 'no-store', body: body});
+  }
+  async function api(action, fields) {
+    var response = await request(action, fields);
+    var data = await response.json();
+    if (!response.ok || !data.ok) {
+      var error = new Error(data.error || 'Не удалось выполнить запрос.');
+      error.status = response.status; throw error;
+    }
+    return data;
+  }
+  function setAccess(value) {
+    unlocked = value; prices = {}; priceRequest++;
+    showPriceBtn.classList.toggle('is-hidden', unlocked);
+    hidePriceBtn.classList.toggle('is-hidden', !unlocked);
+    codeForm.classList.add('is-hidden'); codeInput.value = '';
+    render();
+  }
+  async function refreshPrices() {
+    if (!unlocked) { return; }
+    var serial = ++priceRequest;
+    try {
+      var data = await api('prices', {items: JSON.stringify(orderItems(store.read()))});
+      if (serial !== priceRequest || !unlocked) { return; }
+      prices = data.prices; render();
+    } catch (error) {
+      if (serial !== priceRequest) { return; }
+      setAccess(false); message.textContent = error.message;
+    }
+  }
+  showPriceBtn.addEventListener('click', function () {
+    codeForm.classList.remove('is-hidden'); codeInput.focus(); message.textContent = '';
+  });
+  codeForm.addEventListener('submit', async function (event) {
+    event.preventDefault(); var button = codeForm.querySelector('button'); button.disabled = true;
+    try {
+      await api('unlock', {code: codeInput.value});
+      setAccess(true); message.textContent = ''; await refreshPrices();
+    } catch (error) { message.textContent = error.message; }
+    finally { codeInput.value = ''; button.disabled = false; }
+  });
+  hidePriceBtn.addEventListener('click', async function () {
+    // Hide prices after the server revokes access; export verifies the same session.
+    hidePriceBtn.disabled = true;
+    try { await api('hide'); setAccess(false); message.textContent = ''; }
+    catch (error) { message.textContent = error.message; }
+    finally { hidePriceBtn.disabled = false; }
+  });
+  // Another tab may hide prices or the administrator may change the code.
+  window.addEventListener('focus', syncAccess);
+  async function syncAccess() {
+    try {
+      var state = await api('status'); setAccess(state.unlocked);
+      if (state.unlocked) { await refreshPrices(); }
+    } catch (error) { setAccess(false); message.textContent = error.message; }
+  }
+
 
   function positionsLabel(count) {
     var mod10 = count % 10;
@@ -63,6 +135,7 @@
            так на телефоне ничего не уезжает вбок. */
         return '<div class="order-item">'
           + '<div class="order-item__name">' + escapeHtml(item.name) + '</div>'
+          + (unlocked ? '<div class="order-item__purchase">Закупочная цена: ' + escapeHtml(prices[String(item.id)] || '—') + '</div>' : '')
           + '<div class="order-item__row">'
           + (stock !== '' ? '<span class="order-item__stock">' + escapeHtml(stock) + '</span>' : '<span></span>')
           + '<div class="qty">'
@@ -101,11 +174,6 @@
 
   /* ---------- Скачивание ---------- */
 
-  function csvCell(value) {
-    var text = String(value == null ? '' : value);
-    return '"' + text.replace(/"/g, '""') + '"';
-  }
-
   /* Имя файла делаем латиницей: часть браузеров молча отбрасывает кириллицу
      в атрибуте download и сохраняет файл как «download». Содержимое при этом
      остаётся на русском. */
@@ -134,14 +202,13 @@
     return result.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
-  function download(group) {
-    var lines = [['Товар', 'Количество'].map(csvCell).join(';')];
-    group.items.forEach(function (item) {
-      lines.push([item.name, store.qtyOf(item)].map(csvCell).join(';'));
-    });
-
-    /* BOM нужен, чтобы Excel открыл кириллицу правильно */
-    var blob = new Blob(['﻿' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8;' });
+  async function download(group) {
+    var blob;
+    try {
+      var response = await request('export', {items: JSON.stringify(orderItems(group.items))});
+      if (!response.ok) { var error = await response.json(); throw new Error(error.error || 'Не удалось скачать таблицу.'); }
+      blob = await response.blob();
+    } catch (error) { message.textContent = error.message; return; }
     var url = URL.createObjectURL(blob);
     var link = document.createElement('a');
     var date = new Date().toISOString().slice(0, 10);
@@ -218,6 +285,7 @@
     }
   });
 
-  store.onChange(render);
+  store.onChange(function () { render(); refreshPrices(); });
   render();
+  syncAccess();
 })();

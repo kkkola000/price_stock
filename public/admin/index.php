@@ -115,8 +115,13 @@ switch ($page) {
     case 'settings':
         if ($_SERVER['REQUEST_METHOD']==='POST') {
             try {
-                App\Support\TimezoneSettings::save(trim((string)($_POST['timezone']??'')));
-                flash('success','Часовой пояс сохранён.');
+                if (($_POST['action']??'')==='purchase-code') {
+                    App\Support\PurchaseAccess::save((string)($_POST['purchase_code']??''),isset($_POST['disable_purchase_code']));
+                    flash('success','Настройка доступа к закупочным ценам сохранена. Предыдущие разрешения сброшены.');
+                } else {
+                    App\Support\TimezoneSettings::save(trim((string)($_POST['timezone']??'')));
+                    flash('success','Часовой пояс сохранён.');
+                }
             } catch (Throwable $exception) {flash('error',$exception->getMessage());}
             redirect('index.php?page=settings');
         }

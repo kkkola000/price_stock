@@ -122,7 +122,7 @@ final class ProductRepository
         $placeholders = [];
         $params = [];
         foreach ($rows as $i => $row) {
-            $placeholders[] = "(:source_id_$i, :sku_$i, :name_$i, :price_$i, :price_text_$i, :promo_price_$i, :promo_price_text_$i, :currency_$i,"
+            $placeholders[] = "(:source_id_$i, :sku_$i, :name_$i, :price_$i, :price_text_$i, :promo_price_$i, :promo_price_text_$i, :purchase_price_$i, :purchase_price_text_$i, :currency_$i,"
                 . " :stock_qty_$i, :stock_text_$i, :availability_$i, :image_url_$i, :extra_$i, :run_$i)";
             $params["source_id_$i"]    = $sourceId;
             $params["sku_$i"]          = $row['sku'];
@@ -131,6 +131,8 @@ final class ProductRepository
             $params["price_text_$i"]   = $row['price_text'];
             $params["promo_price_$i"] = $row['promo_price'] ?? null;
             $params["promo_price_text_$i"] = $row['promo_price_text'] ?? null;
+            $params["purchase_price_$i"] = $row['purchase_price'] ?? null;
+            $params["purchase_price_text_$i"] = $row['purchase_price_text'] ?? null;
             $params["currency_$i"]     = $row['currency'];
             $params["stock_qty_$i"]    = $row['stock_qty'];
             $params["stock_text_$i"]   = $row['stock_text'];
@@ -141,7 +143,7 @@ final class ProductRepository
         }
 
         $sql = 'INSERT INTO products
-                    (source_id, sku, name, price, price_text, promo_price, promo_price_text, currency, stock_qty, stock_text,
+                    (source_id, sku, name, price, price_text, promo_price, promo_price_text, purchase_price, purchase_price_text, currency, stock_qty, stock_text,
                      availability, image_url, extra, import_run_id)
                 VALUES ' . implode(', ', $placeholders) . '
                 ON DUPLICATE KEY UPDATE
@@ -150,6 +152,8 @@ final class ProductRepository
                     price_text    = VALUES(price_text),
                     promo_price   = VALUES(promo_price),
                     promo_price_text = VALUES(promo_price_text),
+                    purchase_price = VALUES(purchase_price),
+                    purchase_price_text = VALUES(purchase_price_text),
                     currency      = VALUES(currency),
                     stock_qty     = VALUES(stock_qty),
                     stock_text    = VALUES(stock_text),

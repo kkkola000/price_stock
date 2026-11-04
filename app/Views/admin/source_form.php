@@ -38,6 +38,7 @@ $checked = static function (string $key, bool $default) use ($old, $source): boo
 $type = (string) $val('type', 'excel');
 $fetchMethod = (string) $val('fetch_method', 'upload');
 $ymlDefaults = SourceRepository::defaultYmlMapping();
+$ymlDefaults['purchase_price'] = '';
 ?>
 <form class="form" method="post" action="index.php?page=source-save" enctype="multipart/form-data" id="js-source-form">
   <?= Csrf::field() ?>
