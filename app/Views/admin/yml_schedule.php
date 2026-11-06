@@ -34,9 +34,10 @@ $cycleSettings=CycleSettings::get();$cycleState=CycleSettings::state();$cycleNex
   <?php foreach(($cycleState['result']['errors']??[]) as $cycleError): ?><p class="error-text"><?= e($cycleError) ?></p><?php endforeach; ?>
   <?php if(!empty($cycleState['error'])): ?><p class="error-text"><?= e($cycleState['error']) ?></p><?php endif; ?>
   <form method="post"><?= App\Support\Csrf::field() ?><button class="btn btn--ghost" name="action" value="cycle-run">Обновить раздел сейчас</button></form>
-  <details><summary>Запуск планировщика на сервере</summary>
-    <p>Общий cron панели проверяет это расписание после обновления поставщиков. Для отдельного запуска всего раздела:</p>
-    <pre class="feed-preview">php <?= e(APP_ROOT.'/bin/yml.php') ?> --watch</pre>
-    <p>Постоянный обработчик обеспечивает интервал в секундах. Разовая проверка: <code>php <?= e(APP_ROOT.'/bin/yml.php') ?> --once</code>. Запускайте под пользователем сайта через менеджер процессов. Старый обработчик <code>bin/ozon.php</code> после сохранения этого расписания также обслуживает весь цикл, поэтому отдельной отправки Ozon между циклами не будет.</p>
-  </details>
+  <div class="field__hint">
+    <p><strong>Используется общий планировщик источников.</strong> Он сначала обновляет поставщиков, затем проверяет интервал YML и выполняет весь цикл. Отдельный процесс запускать не нужно.</p>
+    <?php $panelPing=App\Support\Scheduler::lastPing(); ?>
+    <p>Последний запуск общего планировщика: <?= $panelPing!==null?e($panelPing['last_ping_at']):'ещё не зарегистрирован' ?>.</p>
+    <p>Частота обновления ограничена общим cron: при запуске раз в минуту интервал 30 секунд всё равно проверяется раз в минуту. Галочка и интервал выше определяют, выполнять ли цикл при очередном запуске.</p>
+  </div>
 </div>

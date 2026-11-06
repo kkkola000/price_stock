@@ -33,12 +33,7 @@ if(is_array($ozonPlan)&&(time()-$ozonPlan['created']>600||!hash_equals($ozonPlan
   <p><?= !empty($ozon['auto_enabled'])?'Включено · каждые '.(int)$ozon['interval_seconds'].' сек.':'Выключено' ?></p>
   <?php if($sameTarget&&!empty($schedule['last_started'])): ?><p>Последняя попытка: <?= e(date('d.m.Y H:i:s',(int)$schedule['last_started'])) ?> · <?= e(['ok'=>'успешно','error'=>'ошибка','running'=>'выполняется'][$schedule['last_status']??'']??'—') ?></p><?php endif; ?>
   <?php if($next!==null): ?><p>Следующий запуск: <?= $next<=time()?'ожидает обработчика':e(date('d.m.Y H:i:s',$next)) ?></p><?php endif; ?>
-  <details><summary>Как запустить автообновление</summary>
-    <p>Для интервала в секундах запустите постоянный обработчик на сервере:</p>
-    <pre class="feed-preview">php <?= e(APP_ROOT.'/bin/ozon.php') ?> --watch</pre>
-    <p class="field__hint">Для постоянной работы используйте менеджер процессов сервера. Обработчик берёт актуальные остатки из базы; импорт прайсов настраивается отдельно. Для разовой проверки расписания: <code>php <?= e(APP_ROOT.'/bin/ozon.php') ?> --once</code>.</p>
-    <p class="field__hint">Общий планировщик импортов также проверяет расписание Ozon. Если он запускается раз в минуту, интервалы меньше минуты обеспечит только постоянный обработчик. После ошибок применяется пауза не менее 60 секунд.</p>
-  </details>
+  <p class="field__hint">Отправку проверяет существующий общий планировщик источников после обновления прайсов и сборки YML. Отдельный обработчик не нужен. Для одного интервала всего раздела перейдите в <a href="yml.php?tab=schedule">«Автообновление раздела»</a>.</p>
 </div>
 <?php else: ?><div class="card"><h2 class="card__title">Единый цикл YML</h2><p>Автоматическая отправка выполняется после обновления файлов и сборки фидов. <a href="yml.php?tab=schedule">Расписание и статус всего раздела</a>.</p></div><?php endif; ?>
 <div class="card">
