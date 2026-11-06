@@ -175,3 +175,13 @@
   document.addEventListener('click',function(event){var button=event.target.closest('[data-remove-stock]');if(button)button.closest('tr').remove();});
   refresh();paint();
 })();
+
+/* Shared account menu on every authenticated admin page. */
+(function () {
+  document.addEventListener('click', function (event) {
+    document.querySelectorAll('.admin-account[open]').forEach(function (menu) { if (!menu.contains(event.target)) { menu.open = false; } });
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { document.querySelectorAll('.admin-account[open]').forEach(function (menu) { menu.open = false; menu.querySelector('summary').focus(); }); }
+  });
+})();

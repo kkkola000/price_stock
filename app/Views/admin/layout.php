@@ -6,6 +6,7 @@ use App\Support\Auth;
 use App\Support\Config;
 
 $messages = flash();
+$isSourceForm = str_ends_with((string)$content,'/source_form.php');
 ?>
 <!doctype html>
 <html lang="ru">
@@ -15,28 +16,13 @@ $messages = flash();
 <title><?= e($pageTitle) ?> — админка</title>
 <link rel="stylesheet" href="<?= e(asset('assets/css/admin.css', '../')) ?>">
 </head>
-<body>
+<body class="admin-page<?= $isSourceForm?' yml-page admin-source-page':'' ?>">
 <?php if ($showNav): ?>
-<header class="a-header">
-  <div class="a-header__inner">
-    <a class="a-header__logo" href="index.php"><?= e(Config::get('site_name', 'Каталог')) ?> <span>админка</span></a>
-    <nav class="a-nav">
-      <a href="index.php">Источники</a>
-      <a href="index.php?page=runs">Журнал импортов</a>
-      <a href="yml.php">Выгрузка YML</a>
-      <a href="index.php?page=settings">Настройки</a>
-      <a href="../index.php" target="_blank" rel="noopener">Витрина ↗</a>
-    </nav>
-    <div class="a-user">
-      <span><?= e(Auth::username()) ?></span>
-      <a href="index.php?page=logout">Выйти</a>
-    </div>
-  </div>
-</header>
+<?php require APP_ROOT.'/app/Views/admin/header.php'; ?>
 <?php endif; ?>
 
 <main class="a-main<?= $showNav ? '' : ' a-main--narrow' ?>">
-  <h1 class="a-title"><?= e($pageTitle) ?></h1>
+  <h1 class="a-title"><?= e($isSourceForm&&$source!==null?$source['name']:$pageTitle) ?><?php if($isSourceForm&&$source!==null): ?> <span class="pill <?= (int)$source['is_active']===1?'pill--ok':'pill--disabled' ?>"><?= (int)$source['is_active']===1?'Активен':'Отключён' ?></span><?php endif; ?></h1>
 
   <?php foreach ($messages as $message): ?>
     <div class="alert alert--<?= e($message['type']) ?>"><?= e($message['message']) ?></div>
@@ -61,5 +47,6 @@ $messages = flash();
 </main>
 
 <script src="<?= e(asset('assets/js/admin.js', '../')) ?>" defer></script>
+<?php if($isSourceForm): ?><script src="<?= e(asset('assets/js/yml.js', '../')) ?>" defer></script><?php endif; ?>
 </body>
 </html>
