@@ -30,28 +30,34 @@ final class OzonScheduler
     public static function recordResult(array $settings,array $result,int $started,?int $finished=null): void
     {
         $finished=$finished??time();
+        $retryInterval=CycleSettings::configured()?(int)CycleSettings::get()['interval_seconds']:(int)($settings['interval_seconds']??300);
         $ok=(int)($result['failed']??0)+(int)($result['not_sent']??0)===0&&empty($result['errors']);
         OzonSettings::write('ozon-api-schedule.json',[
             'fingerprint'=>OzonSettings::fingerprint($settings),'last_started'=>$started,'last_finished'=>$finished,
-            'retry_after'=>$ok?0:$finished+max(60,(int)($settings['interval_seconds']??300)),
+            'retry_after'=>$ok?0:$finished+max(60,$retryInterval),
             'last_status'=>$ok?'ok':'error','source'=>$result['source']??'manual',
         ]);
     }
 
-    public static function tick(?OzonClient $client=null,?int $now=null): array
+    public static function tick(?OzonClient $client=null,?int $now=null,bool $cycle=false): array
     {
+        if(!$cycle&&CycleSettings::configured())return ['status'=>'managed_by_yml'];
+        $fixedClock=$now!==null;
         $now=$now??time();$lock=null;$result=null;
         try {
             $settings=OzonSettings::get();
+            if($cycle&&!CycleSettings::feedActive((int)$settings['feed_id']))return ['status'=>'inactive_feed'];
             $next=self::nextDue($settings,OzonSettings::scheduleState(),$now);
             if($next===null)return ['status'=>'disabled'];
-            if($next>$now)return ['status'=>'not_due','next_run'=>$next];
+            if($cycle&&!empty(OzonSettings::scheduleState()['retry_after'])&&OzonSettings::scheduleState()['retry_after']>$now)return ['status'=>'backoff'];
+            if(!$cycle&&$next>$now)return ['status'=>'not_due','next_run'=>$next];
             $lock=fopen(APP_STORAGE.'/ozon-api.lock','c');
             if($lock===false||!flock($lock,LOCK_EX|LOCK_NB))return ['status'=>'busy'];
             // Another process may have finished or settings may have changed while acquiring the lock.
             $settings=OzonSettings::get();$next=self::nextDue($settings,OzonSettings::scheduleState(),$now);
             if($next===null)return ['status'=>'disabled'];
-            if($next>$now)return ['status'=>'not_due','next_run'=>$next];
+            if($cycle&&!empty(OzonSettings::scheduleState()['retry_after'])&&OzonSettings::scheduleState()['retry_after']>$now)return ['status'=>'backoff'];
+            if(!$cycle&&$next>$now)return ['status'=>'not_due','next_run'=>$next];
             self::claim($settings,$now);
             try {
                 $rows=OzonUpdater::prepare($settings);
@@ -61,7 +67,7 @@ final class OzonScheduler
             }
             $result['source']='auto';$result['warehouse_id']=(int)$settings['warehouse_id'];$result['warehouse_name']=$settings['warehouse_name'];$result['client_id']=$settings['client_id'];
             // A test clock is fixed; production uses completion time so slow requests do not overlap.
-            $finished=func_num_args()>=2?$now:time();
+            $finished=$fixedClock?$now:time();
             self::recordResult($settings,$result,$now,$finished);
             OzonSettings::write('ozon-api-result.json',$result);
             $next=self::nextDue($settings,OzonSettings::scheduleState(),$finished);

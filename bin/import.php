@@ -42,6 +42,7 @@ $updateYml = static function () use ($log): void {
             $stats['feeds'],
             $stats['offers']
         ));
+        if(isset($stats['status']))$log('Полный цикл YML: '.$stats['status'].(isset($stats['next_run'])?' · следующий '.date('d.m.Y H:i:s',$stats['next_run']):'').(!empty($stats['message'])?' · '.$stats['message']:''));
         if(isset($stats['ozon']))$log('Ozon: '.$stats['ozon']['status'].(isset($stats['ozon']['message'])?' — '.$stats['ozon']['message']:''));
     } catch (Throwable $exception) {
         error_log('[yml-export] автообновление: ' . $exception->getMessage());

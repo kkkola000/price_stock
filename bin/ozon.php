@@ -12,7 +12,7 @@ $watch=isset($options['watch']);$previous='';
 do {
     $zone=TimezoneSettings::current((string)Config::get('timezone','UTC'));
     Config::load(array_replace(Config::all(),['timezone'=>$zone]));date_default_timezone_set($zone);
-    $result=OzonScheduler::tick();Db::disconnect();
+    $result=\App\YmlExport\CycleSettings::configured()?\App\YmlExport\CycleScheduler::tick():OzonScheduler::tick();Db::disconnect();
     $status=$result['status'];
     if(!$watch||in_array($status,['sent','error'],true)||$status!==$previous&&$status!=='not_due') {
         echo date('c').' Ozon: '.$status;

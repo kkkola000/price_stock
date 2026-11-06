@@ -24,9 +24,10 @@ final class FeedBuilder
      *
      * @return array{feeds:int,offers:int}
      */
-    public static function buildAll(): array
+    public static function buildAll(bool $scheduled=false): array
     {
         $feeds = FeedRepository::list();
+        if($scheduled)$feeds=array_values(array_filter($feeds,static fn(array $feed):bool=>CycleSettings::feedActive((int)$feed['id'])));
         $offers = 0;
         foreach ($feeds as $feed) {
             $offers += self::buildFeed($feed)['offers'];

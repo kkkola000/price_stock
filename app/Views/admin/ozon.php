@@ -2,6 +2,7 @@
 use App\Support\Csrf;
 use App\YmlExport\OzonSettings;
 use App\YmlExport\OzonScheduler;
+$unifiedSchedule=\App\YmlExport\CycleSettings::configured();
 $ozon=OzonSettings::get();$ozonPlan=$_SESSION['ozon_plan']??null;$ozonResult=OzonSettings::lastResult();
 if(is_array($ozonPlan)&&(time()-$ozonPlan['created']>600||!hash_equals($ozonPlan['fingerprint'],OzonSettings::fingerprint($ozon)))){unset($_SESSION['ozon_plan']);$ozonPlan=null;}
 ?>
@@ -15,16 +16,17 @@ if(is_array($ozonPlan)&&(time()-$ozonPlan['created']>600||!hash_equals($ozonPlan
       <label class="field"><span class="field__label">Источник товаров</span><select class="input" name="feed_id"><?php foreach($feeds as $feed): ?><option value="<?= (int)$feed['id'] ?>"<?= sel((int)$feed['id'],(int)($ozon['feed_id']??0)) ?>><?= e($feed['name']) ?></option><?php endforeach; ?></select><span class="field__hint">Используются выбранные для этой ссылки активные склады и подтверждённые сопоставления.</span></label>
 
     </div>
-    <h3 class="a-subtitle">Склад назначения и расписание</h3>
+    <h3 class="a-subtitle">Склад назначения и участие в автообновлении</h3>
     <div class="grid-2">
       <label class="field"><span class="field__label">Склад назначения Ozon (куда отправлять остаток)</span><select class="input" name="warehouse_id" id="ozon-warehouse"><option value="0">Сначала загрузите и выберите склад</option><?php foreach(($ozon['warehouses']??[])as $warehouse): ?><option value="<?= (int)$warehouse['warehouse_id'] ?>"<?= sel((int)$warehouse['warehouse_id'],(int)($ozon['warehouse_id']??0)) ?>><?= e($warehouse['name']) ?> · <?= (int)$warehouse['warehouse_id'] ?></option><?php endforeach; ?></select></label>
-      <label class="field"><span class="field__label">Интервал обновления, секунд</span><input class="input" name="interval_seconds" id="ozon-interval" type="number" min="1" max="2147483647" step="1" required value="<?= (int)($ozon['interval_seconds']??300) ?>"><span class="field__hint">Например: 30 — каждые 30 секунд, 300 — раз в 5 минут. Интервал отсчитывается после завершения отправки.</span></label>
+      <?php if(!$unifiedSchedule): ?>      <label class="field"><span class="field__label">Интервал обновления, секунд</span><input class="input" name="interval_seconds" id="ozon-interval" type="number" min="1" max="2147483647" step="1" required value="<?= (int)($ozon['interval_seconds']??300) ?>"><span class="field__hint">Например: 30 — каждые 30 секунд, 300 — раз в 5 минут. Интервал отсчитывается после завершения отправки.</span></label><?php else: ?><input type="hidden" name="interval_seconds" value="<?= (int)$ozon['interval_seconds'] ?>"><p><a href="yml.php?tab=schedule">Общее расписание всего раздела YML</a>. Интервал отправки API определяется полным циклом.</p><?php endif; ?>
     </div>
-    <label class="check-inline"><input type="checkbox" name="auto_enabled"<?= !empty($ozon['auto_enabled'])?' checked':'' ?>> Автоматически обновлять остатки на выбранном складе Ozon</label>
+    <label class="check-inline"><input type="checkbox" name="auto_enabled"<?= !empty($ozon['auto_enabled'])?' checked':'' ?>> <?= $unifiedSchedule?'Отправлять остатки в Ozon в общем цикле раздела':'Автоматически обновлять остатки на выбранном складе Ozon' ?></label>
     <p class="field__hint">При смене аккаунта или API-Key выберите склад заново и повторно включите автообновление.</p>
     <div class="form__actions"><button class="btn btn--primary" name="action" value="ozon-save">Сохранить настройки</button><button class="btn btn--ghost" name="action" value="ozon-load">Сохранить и загрузить склады Ozon</button></div>
   </form>
 </div>
+<?php if(!$unifiedSchedule): ?>
 <div class="card">
   <h2 class="card__title">Состояние автообновления</h2>
   <?php $schedule=OzonSettings::scheduleState();$next=OzonScheduler::nextDue($ozon,$schedule);$sameTarget=($schedule['fingerprint']??'')===OzonSettings::fingerprint($ozon); ?>
@@ -38,6 +40,7 @@ if(is_array($ozonPlan)&&(time()-$ozonPlan['created']>600||!hash_equals($ozonPlan
     <p class="field__hint">Общий планировщик импортов также проверяет расписание Ozon. Если он запускается раз в минуту, интервалы меньше минуты обеспечит только постоянный обработчик. После ошибок применяется пауза не менее 60 секунд.</p>
   </details>
 </div>
+<?php else: ?><div class="card"><h2 class="card__title">Единый цикл YML</h2><p>Автоматическая отправка выполняется после обновления файлов и сборки фидов. <a href="yml.php?tab=schedule">Расписание и статус всего раздела</a>.</p></div><?php endif; ?>
 <div class="card">
   <h2 class="card__title">Обновление остатков</h2>
   <p>Артикул <code>offer_id</code> — из файла склада. Остаток — с витрины, с учётом числовых порогов, текстовых соответствий и резервного значения. При нескольких исходных складах используется приоритетный.</p>

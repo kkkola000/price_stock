@@ -166,6 +166,8 @@ switch ($page) {
                 flash('error', $result['source_name'] . ': ' . $result['message']);
             }
         }
+        $ymlCycle=App\YmlExport\CycleScheduler::tick(true);
+        flash($ymlCycle['status']==='ok'?'success':'warning','Раздел YML: '.$ymlCycle['status'].'. Фидов: '.$ymlCycle['feeds'].'. '.($ymlCycle['message']??''));
         redirect('index.php');
         break;
 }

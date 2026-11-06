@@ -84,6 +84,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? '');
 
     switch ($action) {
+        case 'cycle-save':
+            $cycleLock=fopen(APP_STORAGE.'/yml-cycle.lock','c');
+            try {
+                if($cycleLock===false||!flock($cycleLock,LOCK_EX|LOCK_NB))throw new RuntimeException('Цикл уже выполняется. Сохраните настройки после его завершения.');
+                App\YmlExport\CycleSettings::save($_POST);
+                $activeWarehouses=array_map('intval',(array)($_POST['active_warehouses']??[]));
+                foreach(WarehouseRepository::list() as $warehouse)WarehouseRepository::setActive((int)$warehouse['id'],in_array((int)$warehouse['id'],$activeWarehouses,true));
+                flash('success','Общее расписание раздела YML сохранено.');
+            } catch(Throwable $exception){flash('error',$exception->getMessage());}
+            finally{if(is_resource($cycleLock)){flock($cycleLock,LOCK_UN);fclose($cycleLock);}}
+            redirect('yml.php?tab=schedule');
+        case 'cycle-run':
+            @set_time_limit(0);
+            $cycle=App\YmlExport\CycleScheduler::tick(true);
+            flash($cycle['status']==='ok'?'success':'warning','Обновление YML: '.$cycle['status'].'. Файлов: '.$cycle['uploads'].', фидов: '.$cycle['feeds'].'. '.($cycle['message']??''));
+            redirect('yml.php?tab=schedule');
+
         case 'ozon-save':
         case 'ozon-load':
             try {
@@ -712,12 +729,15 @@ $pendingCount = $matchStats['suggested'] + $matchStats['unmatched'];
       <?php if ($pendingCount > 0): ?><span class="pill pill--running"><?= (int) $pendingCount ?></span><?php endif; ?></a>
     <a href="yml.php?tab=settings" class="<?= $tab === 'settings' ? 'is-active' : '' ?>">Настройка фида</a>
     <a href="yml.php?tab=feed" class="<?= $tab === 'feed' ? 'is-active' : '' ?>">Готовый фид</a>
+    <a href="yml.php?tab=schedule" class="<?= $tab === 'schedule' ? 'is-active' : '' ?>">Автообновление раздела</a>
     <a href="yml.php?tab=api" class="<?= $tab === 'api' ? 'is-active' : '' ?>">Обновление по API</a>
   </div>
 
   <?php foreach ($flash as $item): ?>
     <div class="alert alert--<?= e((string) $item['type']) ?>"><?= e((string) $item['message']) ?></div>
   <?php endforeach; ?>
+
+<?php if ($tab === 'schedule'): require APP_ROOT.'/app/Views/admin/yml_schedule.php'; endif; ?>
 
 <?php if ($tab === 'warehouses'): ?>
   <!-- ================= Склады и загрузка ================= -->

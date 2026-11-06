@@ -1,0 +1,20 @@
+// Clean development environment. Only its own warehouses, feeds and schedule files are removed.
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{execFileSync}=require('child_process');
+const root=path.resolve(__dirname,'..'),base=process.env.YML_TEST_BASE_URL || 'http://127.0.0.1:8080';
+const files=['yml-cycle.json','yml-cycle-state.json'].map(f=>path.join(root,'storage',f));
+if(files.some(f=>fs.existsSync(f))||fs.existsSync(path.join(root,'storage/ozon-api.json')))throw new Error('Use a clean development environment. Existing settings preserved.');
+const php=code=>execFileSync(process.env.PHP_BIN || 'php',['-r',"require 'app/bootstrap.php'; "+code],{cwd:root,encoding:'utf8'}).trim();
+(async()=>{let seed;const browser=await chromium.launch({executablePath:process.env.BROWSER_PATH || '/usr/bin/chromium',args:['--no-sandbox']});try{
+seed=JSON.parse(php("App\\YmlExport\\Schema::ensure(); $wh=App\\YmlExport\\WarehouseRepository::create('Cycle UI active','cycle-ui-a',0); $off=App\\YmlExport\\WarehouseRepository::create('Cycle UI inactive','cycle-ui-b',1); $feed=App\\YmlExport\\FeedRepository::create('Cycle UI active',[$wh]); $offFeed=App\\YmlExport\\FeedRepository::create('Cycle UI inactive',[$off]); echo json_encode(compact('wh','off','feed','offFeed'));"));
+const p=await browser.newPage();await p.goto(base+'/admin/index.php?page=login');await p.locator('[name=username]').fill(process.env.YML_TEST_USER || 'devadmin');await p.locator('[name=password]').fill(fs.readFileSync(process.env.YML_TEST_PASSWORD_FILE,'utf8').trim());await p.locator('button[type=submit]').click();await p.goto(base+'/admin/yml.php?tab=schedule');
+await p.locator('[name=enabled]').check();await p.locator('[name=interval_seconds]').fill('30');await p.locator('[name="active_warehouses[]"][value="'+seed.off+'"]').uncheck();
+for(const box of await p.locator('[name="active_feeds[]"]').all())await box.setChecked((await box.inputValue())===String(seed.feed));
+await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Сохранить расписание',exact:true}).click()]);
+assert(await p.locator('[name=enabled]').isChecked());assert.equal(await p.locator('[name=interval_seconds]').inputValue(),'30');assert(!(await p.locator('[name="active_warehouses[]"][value="'+seed.off+'"]').isChecked()));assert(!(await p.locator('[name="active_feeds[]"][value="'+seed.offFeed+'"]').isChecked()));
+const csrf=await p.locator('[name=csrf_token]').first().inputValue();await p.request.post(base+'/admin/yml.php?tab=schedule',{form:{action:'cycle-save',csrf_token:csrf,interval_seconds:'0'}});await p.reload();assert.equal(await p.locator('[name=interval_seconds]').inputValue(),'30');assert(await p.locator('[name=enabled]').isChecked());
+await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Обновить раздел сейчас',exact:true}).click()]);assert.equal(JSON.parse(fs.readFileSync(files[1],'utf8')).status,'ok');assert.equal(JSON.parse(fs.readFileSync(files[1],'utf8')).result.feeds,1);
+await p.goto(base+'/admin/yml.php?tab=api');assert.equal(await p.locator('#ozon-interval').count(),0);assert(await p.getByRole('link',{name:'Общее расписание всего раздела YML',exact:true}).isVisible());
+await p.goto(base+'/admin/yml.php?tab=schedule');await p.locator('[name=enabled]').uncheck();await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Сохранить расписание',exact:true}).click()]);assert.equal(JSON.parse(fs.readFileSync(files[0],'utf8')).enabled,false);
+console.log('PASS UI: whole-section schedule save/validation, source/feed activity, manual cycle, common API schedule and pause');
+}finally{await browser.close();if(seed)php('App\\YmlExport\\FeedRepository::delete('+seed.feed+'); App\\YmlExport\\FeedRepository::delete('+seed.offFeed+'); App\\YmlExport\\WarehouseRepository::delete('+seed.wh+'); App\\YmlExport\\WarehouseRepository::delete('+seed.off+');');for(const file of files)if(fs.existsSync(file))fs.unlinkSync(file);}})().catch(error=>{console.error(error);process.exit(1)});
