@@ -178,3 +178,53 @@ a { color: var(--accent); }
 .template-variable { color: #8439b6; }
 .template-loop { color: #b55c10; }
 .template-status { padding: 9px 12px; background: #e6f6ed; border-radius: 8px; color: #147b49; }
+
+/* Compact YML section */
+.yml-page .a-main { max-width: 1440px; }
+.yml-page .a-title { margin-bottom: 18px; }
+.yml-page .card { margin-bottom: 16px; }
+.yml-page .card__title { margin: 0; }
+.yml-page .toolbar { margin-bottom: 14px; }
+.yml-page .input { min-width: 0; }
+.yml-page .table th, .yml-page .table td { padding: 12px 14px; }
+.yml-source-name { color: var(--text); text-decoration: none; }
+.yml-source-name:hover { color: var(--accent); }
+.yml-page .warehouse-file { max-width: 240px; overflow-wrap: anywhere; }
+.yml-warehouse-head .toolbar { justify-content: flex-start; gap: 14px; margin: 10px 0; }
+.yml-warehouse-tabs { margin-bottom: 20px; }
+.yml-feed-workspace { display: grid; grid-template-columns: 250px minmax(0,1fr); gap: 18px; align-items: start; }
+.yml-feed-list { padding: 16px; }
+.yml-feed-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); text-decoration: none; }
+.yml-feed-choice > span:not(.pill), .yml-feed-choice > small { width: 100%; color: var(--muted); font-size: 12px; }
+.yml-feed-choice.is-active { border-color: var(--accent); background: #f5f8ff; }
+.yml-feed-content { min-width: 0; }
+.yml-feed-head .tabs { margin: 10px 0 0; }
+.yml-actions, .yml-help { position: relative; display: inline-block; vertical-align: middle; }
+.yml-actions > summary { list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; color: var(--muted); background: var(--surface); }
+.yml-actions > div { position: absolute; z-index: 35; right: 0; top: 100%; margin-top: 5px; min-width: 210px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+.yml-actions form, .yml-actions .btn { display: block; width: 100%; margin: 4px 0; text-align: left; }
+.yml-help { margin-left: 6px; font-size: 12px; font-weight: 400; }
+.yml-help > summary { display: inline-flex; align-items: center; justify-content: center; width: 19px; height: 19px; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); cursor: pointer; list-style: none; }
+.yml-help__panel { position: absolute; z-index: 50; top: calc(100% + 7px); left: 0; width: min(330px,75vw); padding: 12px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; box-shadow: var(--shadow); color: var(--text); font: 13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; text-transform: none; text-align: left; white-space: normal; }
+.yml-help summary::-webkit-details-marker, .yml-actions summary::-webkit-details-marker { display: none; }
+.yml-page .table-wrap:has(.yml-actions[open]) { padding-bottom: 165px; }
+@media(max-width:900px) { .yml-feed-workspace { grid-template-columns: minmax(0,1fr); } .yml-feed-list { display: flex; gap: 10px; overflow-x: auto; } .yml-feed-list .card__title { display: none; } .yml-feed-choice { min-width: 210px; margin: 0; } }
+@media(max-width:600px) { .yml-page .a-main { padding: 16px 12px; } .yml-page .tabs a { padding: 9px 10px; } .yml-help__panel { position: fixed; top: auto; left: 12px; right: 12px; bottom: 20px; width: auto; } }
+.yml-schedule-layout { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(290px,1fr); gap: 18px; align-items: start; }
+.yml-schedule-controls { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: 16px; }
+.yml-schedule-controls > label.field { max-width: 210px; }
+.yml-panel-scheduler { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 16px; }
+.yml-page .card > .yml-help { margin-bottom: 10px; }
+@media(max-width:950px) { .yml-schedule-layout { grid-template-columns: minmax(0,1fr); } }
+.yml-feed-content .table th, .yml-feed-content .table td { padding: 7px 10px; }
+.yml-feed-content .table .input { padding: 7px 10px; }
+.yml-feed-content .template-editor { height: 330px; background: #111827; }
+.yml-feed-content .template-highlight { color: #d5deee; }
+.yml-feed-content .template-tag { color: #82cfff; }
+.yml-feed-content .template-variable { color: #ffce8c; }
+.yml-feed-content .template-loop { color: #b5a0ff; }
+.yml-feed-content .template-editor textarea { caret-color: #fff; }
+.yml-feed-content .template-lines { color: #8390a6; }
+.yml-advanced > summary { cursor: pointer; font-size: 15px; font-weight: 650; padding: 2px 0; }
+.yml-advanced-section { margin-top: 18px; }
+.yml-help__panel { max-height: 60vh; overflow-y: auto; }

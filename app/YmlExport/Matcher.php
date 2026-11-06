@@ -101,10 +101,10 @@ final class Matcher
     }
 
     /** Remove confirmations only, including entries outside the visible/filtered list. */
-    public static function clearConfirmed(): int
+    public static function clearConfirmed(int $warehouseId=0): int
     {
         return Db::run("UPDATE yx_matches SET status=IF(product_id IS NULL, 'unmatched', 'suggested'),
-            confirmed_by=NULL, confirmed_at=NULL WHERE status='confirmed'")->rowCount();
+            confirmed_by=NULL, confirmed_at=NULL WHERE status='confirmed'".($warehouseId>0?' AND warehouse_id = ?':''),$warehouseId>0?[$warehouseId]:[])->rowCount();
     }
 
     /** Подтверждение пары администратором (в т.ч. с выбранным вручную товаром). */
@@ -144,12 +144,12 @@ final class Matcher
     }
 
     /** Массовое подтверждение предложенных пар с совпадением не ниже порога. */
-    public static function bulkConfirm(int $minScore, int $adminId): int
+    public static function bulkConfirm(int $minScore, int $adminId, int $warehouseId=0): int
     {
         $stmt = Db::run(
             "UPDATE yx_matches SET status = 'confirmed', confirmed_by = ?, confirmed_at = NOW()
-             WHERE status = 'suggested' AND score >= ?",
-            [$adminId, $minScore]
+             WHERE status = 'suggested' AND score >= ?".($warehouseId>0?' AND warehouse_id = ?':''),
+            $warehouseId>0?[$adminId, $minScore, $warehouseId]:[$adminId, $minScore]
         );
 
         return $stmt->rowCount();
@@ -185,10 +185,11 @@ final class Matcher
      *
      * @return list<array<string,mixed>>
      */
-    public static function confirmedList(int $limit = 500, string $query = '', string $field = 'all'): array
+    public static function confirmedList(int $limit = 500, string $query = '', string $field = 'all', int $warehouseId=0): array
     {
         [$search, $params] = self::searchWhere(trim($query), $field,
             ['sku'=>['m.item_sku','p.sku'], 'name'=>['i.name','p.name']], ['w.name']);
+        if($warehouseId>0){$search='('.$search.') AND m.warehouse_id=?';$params[]=$warehouseId;}
         return Db::all(
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
@@ -207,10 +208,11 @@ final class Matcher
      *
      * @return list<array<string,mixed>>
      */
-    public static function queue(int $limit = 300, string $query = '', string $field = 'all'): array
+    public static function queue(int $limit = 300, string $query = '', string $field = 'all', int $warehouseId=0): array
     {
         [$search, $params] = self::searchWhere(trim($query), $field,
             ['sku'=>['m.item_sku','p.sku'], 'name'=>['i.name','p.name']], ['w.name']);
+        if($warehouseId>0){$search='('.$search.') AND m.warehouse_id=?';$params[]=$warehouseId;}
         return Db::all(
             "SELECT m.*, i.name AS item_name, i.stock_qty, i.price,
                     w.name AS warehouse_name, p.name AS product_name, p.sku AS product_sku_live
@@ -235,12 +237,12 @@ final class Matcher
     }
 
     /** @return array<string,int> */
-    public static function stats(): array
+    public static function stats(int $warehouseId=0): array
     {
         $rows = Db::all('SELECT m.status, COUNT(*) AS c FROM yx_matches m
             JOIN yx_warehouses w ON w.id=m.warehouse_id
             JOIN yx_items i ON i.warehouse_id=m.warehouse_id AND i.sku=m.item_sku
-            GROUP BY m.status');
+            '.($warehouseId>0?'WHERE m.warehouse_id=? ':'').'GROUP BY m.status',$warehouseId>0?[$warehouseId]:[]);
         $stats = ['suggested' => 0, 'confirmed' => 0, 'rejected' => 0, 'unmatched' => 0];
         foreach ($rows as $row) {
             $stats[(string) $row['status']] = (int) $row['c'];

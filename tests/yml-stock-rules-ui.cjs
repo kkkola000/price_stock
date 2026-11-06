@@ -6,6 +6,7 @@ const base=(process.env.YML_TEST_BASE_URL || 'http://127.0.0.1:8080').replace(/\
 const names=['numeric_stock_enabled','numeric_stock_threshold','numeric_stock_value','numeric_stock_lower_enabled','numeric_stock_lower_threshold','numeric_stock_lower_value'];
 try {
  p=await browser.newPage();await p.goto(base+'/admin/index.php?page=login');await p.locator('[name=username]').fill(process.env.YML_TEST_USER || 'devadmin');await p.locator('[name=password]').fill(fs.readFileSync(process.env.YML_TEST_PASSWORD_FILE,'utf8').trim());await p.locator('button[type=submit]').click();await p.goto(base+'/admin/yml.php?tab=settings');
+ if(await p.locator('#yml-stock-settings').getAttribute('open')===null)await p.locator('#yml-stock-settings > summary').click();
  original={};for(const name of names){const input=p.locator('[name='+name+']');original[name]=name.endsWith('enabled')?await input.isChecked():await input.inputValue();}
  await p.locator('[name=numeric_stock_enabled]').check();await p.locator('[name=numeric_stock_lower_enabled]').check();
  for(const [name,value]of Object.entries({numeric_stock_threshold:'5',numeric_stock_value:'10',numeric_stock_lower_threshold:'4',numeric_stock_lower_value:'0'}))await p.locator('[name='+name+']').fill(value);
@@ -15,6 +16,6 @@ try {
  await p.locator('[name=numeric_stock_threshold]').fill('');await save();assert(await p.getByText(/Порог и число замены должны быть целыми/).isVisible());await p.reload();assert.equal(await p.locator('[name=numeric_stock_threshold]').inputValue(),'5','Invalid empty threshold did not persist');
  console.log('PASS UI: inclusive upper/lower stock settings persist; overlapping and invalid thresholds are rejected');
 }finally{
- if(p&&original){await p.goto(base+'/admin/yml.php?tab=settings');for(const name of names){const input=p.locator('[name='+name+']');if(name.endsWith('enabled'))await input.setChecked(original[name]);else await input.fill(original[name]);}await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Сохранить настройки',exact:true}).click()]);}
+ if(p&&original){await p.goto(base+'/admin/yml.php?tab=settings');if(await p.locator('#yml-stock-settings').getAttribute('open')===null)await p.locator('#yml-stock-settings > summary').click();for(const name of names){const input=p.locator('[name='+name+']');if(name.endsWith('enabled'))await input.setChecked(original[name]);else await input.fill(original[name]);}await Promise.all([p.waitForNavigation(),p.getByRole('button',{name:'Сохранить настройки',exact:true}).click()]);}
  await browser.close();
 }})().catch(e=>{console.error(e);process.exit(1)});

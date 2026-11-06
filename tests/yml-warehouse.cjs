@@ -21,28 +21,28 @@ await page.locator('[name=save_and_import]').click();
 assert(await page.locator('body').innerText().then(x=>!x.includes('Что-то пошло не так')));
 let row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});
 assert.equal(await row.count(),1);assert(await row.innerText().then(x=>x.includes('stock.csv') && x.includes('OK')));
-await row.getByRole('link',{name:'Изменить',exact:true}).click();
+await row.getByRole('link',{name:'Открыть',exact:true}).click();
 assert.equal(await page.locator('[name="mapping[sku]"]').inputValue(),'A');
-await page.locator('[name=save_and_preview]').click();assert(await page.getByText('Проверка маппинга: '+name,{exact:true}).isVisible());
+await page.locator('[name=save_and_preview]').click();assert(await page.getByRole('heading',{name:new RegExp('Проверка маппинга: '+name)}).isVisible());
 // Keep existing file when saving without a replacement and when switching to virtual.
 await page.locator('[name=kind]').selectOption('virtual');await page.locator('[name=default_stock]').fill('7');assert(!(await page.locator('.warehouse-file-settings').isVisible()));
 await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
 row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});assert(await row.innerText().then(x=>x.includes('виртуальный · 7')));
-await row.getByRole('link',{name:'Изменить',exact:true}).click();await page.locator('[name=kind]').selectOption('file');await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
+await row.getByRole('link',{name:'Открыть',exact:true}).click();await page.locator('[name=kind]').selectOption('file');await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
 row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});assert(await row.innerText().then(x=>x.includes('stock.csv')));
-await row.getByRole('link',{name:'Изменить',exact:true}).click();
+await row.getByRole('link',{name:'Открыть',exact:true}).click();
 await page.locator('[name=name]').fill(name+' unsaved');await page.locator('[name=fetch_method]').selectOption('url');await page.locator('[name=source_url]').fill('invalid');
 await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();assert(await page.locator('.alert--error').count()>0);assert.equal(await page.locator('[name=name]').inputValue(),name+' unsaved');
-assert.equal(await page.locator('tr').filter({has:page.getByText(name,{exact:true})}).count(),1);
+assert.equal(await page.locator('tr').filter({has:page.getByText(name,{exact:true})}).count(),0);
 await page.locator('[name=name]').fill(name);await page.locator('[name=source_url]').fill('https://example.com/stock.csv');await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
 row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});assert(await row.innerText().then(x=>x.includes('https://example.com/stock.csv')));
-await row.getByRole('link',{name:'Изменить',exact:true}).click();await page.locator('[name=fetch_method]').selectOption('upload');await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
+await row.getByRole('link',{name:'Открыть',exact:true}).click();await page.locator('[name=fetch_method]').selectOption('upload');await page.locator('#warehouse-settings button').filter({hasText:/^Сохранить$/}).click();
 row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});assert(await row.innerText().then(x=>x.includes('stock.csv')));
 // All shared actions remain available.
-await row.getByRole('button',{name:'Отключить',exact:true}).click();row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});assert(await row.getByRole('button',{name:'Включить',exact:true}).isVisible());await row.getByRole('button',{name:'Включить',exact:true}).click();
+await row.locator('.yml-actions > summary').click();await row.getByRole('button',{name:'Отключить',exact:true}).click();row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});await row.locator('.yml-actions > summary').click();assert(await row.getByRole('button',{name:'Включить',exact:true}).isVisible());await row.getByRole('button',{name:'Включить',exact:true}).click();
 for(const tab of ['matches','settings','feed']) {await page.goto(base+'/admin/yml.php?tab='+tab);assert(!(await page.locator('body').innerText()).includes('Что-то пошло не так'));}
 console.log('PASS: combined creation, validation and retained inputs, file import, mapping preview, virtual/file switching with retained file, all YML tabs');
 }finally{
-if(page){await page.goto(base+'/admin/yml.php');const row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});if(await row.count()){page.on('dialog',d=>d.accept());await row.locator('form').filter({has:page.locator('[name=action][value=warehouse-delete]')}).locator('button').click();}}
+if(page){await page.goto(base+'/admin/yml.php');const row=page.locator('tr').filter({has:page.getByText(name,{exact:true})});if(await row.count()){await row.locator('.yml-actions > summary').click();page.on('dialog',d=>d.accept());await row.locator('form').filter({has:page.locator('[name=action][value=warehouse-delete]')}).locator('button').click();}}
 await b.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
