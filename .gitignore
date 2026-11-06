@@ -21,3 +21,6 @@ storage/purchase-access.json
 
 storage/yml-cycle*.json
 storage/yml-cycle.lock
+
+# Generated YML caches
+storage/feeds/*.xml

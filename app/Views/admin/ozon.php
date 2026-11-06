@@ -1,62 +1,68 @@
 <?php
 use App\Support\Csrf;
-use App\YmlExport\OzonSettings;
-use App\YmlExport\OzonScheduler;
-$unifiedSchedule=\App\YmlExport\CycleSettings::configured();
+use App\YmlExport\{OzonSettings,OzonScheduler,CycleSettings};
+$unifiedSchedule=CycleSettings::configured();
 $ozon=OzonSettings::get();$ozonPlan=$_SESSION['ozon_plan']??null;$ozonResult=OzonSettings::lastResult();
 if(is_array($ozonPlan)&&(time()-$ozonPlan['created']>600||!hash_equals($ozonPlan['fingerprint'],OzonSettings::fingerprint($ozon)))){unset($_SESSION['ozon_plan']);$ozonPlan=null;}
+$apiConfigured=!empty($ozon['api_key'])&&!empty($ozon['client_id'])&&!empty($ozon['warehouse_id']);
 ?>
-<div class="card">
-  <h2 class="card__title">Ozon Seller API</h2>
-  <form method="post" autocomplete="off">
-    <?= Csrf::field() ?>
-    <div class="grid-2">
-      <label class="field"><span class="field__label">Client-Id</span><input class="input" name="client_id" value="<?= e((string)($ozon['client_id']??'')) ?>" inputmode="numeric" required autocomplete="off"></label>
-      <label class="field"><span class="field__label">API-Key</span><input class="input" type="password" name="api_key" value="" autocomplete="new-password" placeholder="<?= !empty($ozon['api_key'])?'Ключ сохранён — оставьте пустым, чтобы сохранить его':'Введите API-Key Ozon' ?>"><span class="field__hint">Ключ не показывается после сохранения. Используйте ключ с доступом к складам и обновлению остатков.</span></label>
-      <label class="field"><span class="field__label">Источник товаров</span><select class="input" name="feed_id"><?php foreach($feeds as $feed): ?><option value="<?= (int)$feed['id'] ?>"<?= sel((int)$feed['id'],(int)($ozon['feed_id']??0)) ?>><?= e($feed['name']) ?></option><?php endforeach; ?></select><span class="field__hint">Используются выбранные для этой ссылки активные склады и подтверждённые сопоставления.</span></label>
-
+<div class="toolbar yml-api-heading"><h2 class="a-subtitle">Ozon API <span class="pill <?= $apiConfigured?'pill--ok':'pill--never' ?>"><?= $apiConfigured?'Настроено':'Не настроено' ?></span></h2></div>
+<div class="card yml-dense yml-api-strip">
+  <label class="check-inline"><input type="checkbox" form="ozon-settings" name="auto_enabled"<?= !empty($ozon['auto_enabled'])?' checked':'' ?>> <?= $unifiedSchedule?'Отправка в общем цикле':'Автоматическое обновление остатков' ?></label>
+  <a href="yml.php?tab=schedule">Общее расписание<?= $unifiedSchedule?' · '.(int)CycleSettings::get()['interval_seconds'].' сек.':'' ?> ↗</a>
+  <p class="field__hint">Отправка выполняется общим планировщиком после обновления файлов и сборки YML. Галочка применяется после сохранения настроек; сохранение не отправляет остатки.</p>
+</div>
+<div class="yml-api-layout">
+  <section>
+    <div class="card yml-dense">
+      <form method="post" id="ozon-settings" autocomplete="off">
+        <?= Csrf::field() ?>
+        <section class="yml-compact-section">
+          <h3 class="yml-section-heading">Подключение</h3>
+          <div class="yml-two-fields">
+            <label class="field"><span class="field__label">Client-Id</span><input class="input" name="client_id" value="<?= e((string)$ozon['client_id']) ?>" inputmode="numeric" required autocomplete="off"></label>
+            <label class="field"><span class="field__label">API-Key</span><input class="input" type="password" name="api_key" value="" autocomplete="new-password" placeholder="<?= !empty($ozon['api_key'])?'Ключ сохранён':'Введите API-Key' ?>"><span class="field__hint">Оставьте пустым, чтобы сохранить ключ. При смене аккаунта или ключа заново выберите склад и включите отправку.</span></label>
+          </div>
+        </section>
+        <section class="yml-compact-section">
+          <h3 class="yml-section-heading">Отправка</h3>
+          <div class="yml-two-fields">
+            <label class="field"><span class="field__label">Источник товаров</span><select class="input" name="feed_id"><?php foreach($feeds as $feed): ?><option value="<?= (int)$feed['id'] ?>"<?= sel((int)$feed['id'],(int)$ozon['feed_id']) ?>><?= e($feed['name']) ?></option><?php endforeach; ?></select><span class="field__hint">Активные склады выбранной ссылки и подтверждённые сопоставления. Артикул — из файла, остаток — из витрины с правилами преобразования.</span></label>
+            <label class="field"><span class="field__label">Склад Ozon</span><select class="input" name="warehouse_id" id="ozon-warehouse"><option value="0">Загрузите и выберите склад</option><?php foreach($ozon['warehouses']??[] as $warehouse): ?><option value="<?= (int)$warehouse['warehouse_id'] ?>"<?= sel((int)$warehouse['warehouse_id'],(int)$ozon['warehouse_id']) ?>><?= e($warehouse['name']) ?> · <?= (int)$warehouse['warehouse_id'] ?></option><?php endforeach; ?></select></label>
+            <?php if(!$unifiedSchedule): ?><label class="field"><span class="field__label">Интервал, секунд</span><input class="input" name="interval_seconds" id="ozon-interval" type="number" min="1" max="2147483647" step="1" required value="<?= (int)$ozon['interval_seconds'] ?>"><span class="field__hint">Интервал отсчитывается после завершения. Фактическая частота ограничена общим планировщиком источников.</span></label><?php else: ?><input type="hidden" name="interval_seconds" value="<?= (int)$ozon['interval_seconds'] ?>"><?php endif; ?>
+          </div>
+        </section>
+      </form>
+      <div class="yml-form-footer">
+        <button class="btn btn--primary" type="submit" form="ozon-settings" name="action" value="ozon-save">Сохранить настройки</button>
+        <button class="btn btn--ghost" type="submit" form="ozon-settings" name="action" value="ozon-load">Сохранить и загрузить склады Ozon</button>
+      </div>
     </div>
-    <h3 class="a-subtitle">Склад назначения и участие в автообновлении</h3>
-    <div class="grid-2">
-      <label class="field"><span class="field__label">Склад назначения Ozon (куда отправлять остаток)</span><select class="input" name="warehouse_id" id="ozon-warehouse"><option value="0">Сначала загрузите и выберите склад</option><?php foreach(($ozon['warehouses']??[])as $warehouse): ?><option value="<?= (int)$warehouse['warehouse_id'] ?>"<?= sel((int)$warehouse['warehouse_id'],(int)($ozon['warehouse_id']??0)) ?>><?= e($warehouse['name']) ?> · <?= (int)$warehouse['warehouse_id'] ?></option><?php endforeach; ?></select></label>
-      <?php if(!$unifiedSchedule): ?>      <label class="field"><span class="field__label">Интервал обновления, секунд</span><input class="input" name="interval_seconds" id="ozon-interval" type="number" min="1" max="2147483647" step="1" required value="<?= (int)($ozon['interval_seconds']??300) ?>"><span class="field__hint">Например: 30 — каждые 30 секунд, 300 — раз в 5 минут. Интервал отсчитывается после завершения отправки.</span></label><?php else: ?><input type="hidden" name="interval_seconds" value="<?= (int)$ozon['interval_seconds'] ?>"><p><a href="yml.php?tab=schedule">Общее расписание всего раздела YML</a>. Интервал отправки API определяется полным циклом.</p><?php endif; ?>
+    <div class="card yml-dense">
+      <div class="toolbar"><h3 class="yml-section-heading">Проверка перед отправкой</h3><form method="post"><?= Csrf::field() ?><button class="btn btn--ghost" name="action" value="ozon-preview">Подготовить обновление</button></form></div>
+      <p class="card__hint">Предпросмотр действует 10 минут. Изменение настроек или остатков требует новой подготовки. Нули передаются в API для обнуления остатков. При отправке будет обработан весь подготовленный список.</p>
+      <?php if(is_array($ozonPlan)): ?>
+        <p class="yml-preview-count"><?= e((string)$ozon['warehouse_name']) ?> · <b><?= count($ozonPlan['rows']) ?> позиций</b></p>
+        <div class="table-wrap yml-api-preview"><table class="table table--compact"><thead><tr><th>Артикул</th><th>Остаток</th><th>Склад Ozon / ID</th></tr></thead><tbody><?php foreach(array_slice($ozonPlan['rows'],0,100) as $row): ?><tr><td><?= e($row['offer_id']) ?></td><td><?= (int)$row['stock'] ?></td><td><?= (int)$row['warehouse_id'] ?></td></tr><?php endforeach; ?></tbody></table></div>
+        <div class="yml-form-footer"><span class="muted small">Показано <?= min(100,count($ozonPlan['rows'])) ?> из <?= count($ozonPlan['rows']) ?></span><form method="post"><?= Csrf::field() ?><input type="hidden" name="plan_id" value="<?= e($ozonPlan['id']) ?>"><button class="btn btn--primary" name="action" value="ozon-send">Отправить остатки в Ozon</button></form></div>
+      <?php else: ?><span class="muted small">Обновление ещё не подготовлено</span><?php endif; ?>
     </div>
-    <label class="check-inline"><input type="checkbox" name="auto_enabled"<?= !empty($ozon['auto_enabled'])?' checked':'' ?>> <?= $unifiedSchedule?'Отправлять остатки в Ozon в общем цикле раздела':'Автоматически обновлять остатки на выбранном складе Ozon' ?></label>
-    <p class="field__hint">При смене аккаунта или API-Key выберите склад заново и повторно включите автообновление.</p>
-    <div class="form__actions"><button class="btn btn--primary" name="action" value="ozon-save">Сохранить настройки</button><button class="btn btn--ghost" name="action" value="ozon-load">Сохранить и загрузить склады Ozon</button></div>
-  </form>
+  </section>
+  <aside>
+    <div class="card yml-dense" id="ozon-last-result">
+      <h3 class="yml-section-heading">Последняя отправка</h3>
+      <?php if(is_array($ozonResult)): ?>
+        <p class="yml-result-date"><?= e((string)$ozonResult['at']) ?></p>
+        <dl class="yml-result-list"><div><dt>Подтверждено</dt><dd><?= (int)$ozonResult['success'] ?></dd></div><div><dt>Ошибок</dt><dd><?= (int)$ozonResult['failed'] ?></dd></div><div><dt>Не отправлено</dt><dd><?= (int)$ozonResult['not_sent'] ?></dd></div><div><dt>Режим</dt><dd><?= ($ozonResult['source']??'manual')==='auto'?'Автоматически':'Вручную' ?></dd></div><div><dt>Склад</dt><dd><?= e((string)($ozonResult['warehouse_name']??'—')) ?></dd></div><div><dt>Client-Id</dt><dd><?= e((string)($ozonResult['client_id']??'—')) ?></dd></div></dl>
+        <?php foreach($ozonResult['errors']??[] as $error): ?><p class="error-text small"><b><?= e($error['offer_id']) ?></b>: <?= e($error['message']) ?></p><?php endforeach; ?>
+        <p class="field__hint">Показаны первые ошибки; счётчики включают все позиции. После сетевого сбоя результат части запроса может быть неизвестен. Автообновление повторит попытку с паузой не менее 60 секунд.</p>
+      <?php else: ?><p class="muted small">Отправок ещё не было</p><?php endif; ?>
+      <?php if(!$unifiedSchedule): $schedule=OzonSettings::scheduleState();$next=OzonScheduler::nextDue($ozon,$schedule);$sameTarget=($schedule['fingerprint']??'')===OzonSettings::fingerprint($ozon); ?>
+        <p class="small"><?= !empty($ozon['auto_enabled'])?'Включено · каждые '.(int)$ozon['interval_seconds'].' сек.':'Автообновление выключено' ?></p>
+        <?php if($sameTarget&&!empty($schedule['last_started'])): ?><p class="small">Последняя попытка: <?= e(date('d.m.Y H:i:s',(int)$schedule['last_started'])) ?></p><?php endif; ?>
+        <?php if($next!==null): ?><p class="small">Следующий запуск: <?= $next<=time()?'ожидает планировщика':e(date('d.m.Y H:i:s',$next)) ?></p><?php endif; ?>
+      <?php endif; ?>
+      <a class="small" href="yml.php?tab=schedule">Расписание и статус ↗</a>
+    </div>
+  </aside>
 </div>
-<?php if(!$unifiedSchedule): ?>
-<div class="card">
-  <h2 class="card__title">Состояние автообновления</h2>
-  <?php $schedule=OzonSettings::scheduleState();$next=OzonScheduler::nextDue($ozon,$schedule);$sameTarget=($schedule['fingerprint']??'')===OzonSettings::fingerprint($ozon); ?>
-  <p><?= !empty($ozon['auto_enabled'])?'Включено · каждые '.(int)$ozon['interval_seconds'].' сек.':'Выключено' ?></p>
-  <?php if($sameTarget&&!empty($schedule['last_started'])): ?><p>Последняя попытка: <?= e(date('d.m.Y H:i:s',(int)$schedule['last_started'])) ?> · <?= e(['ok'=>'успешно','error'=>'ошибка','running'=>'выполняется'][$schedule['last_status']??'']??'—') ?></p><?php endif; ?>
-  <?php if($next!==null): ?><p>Следующий запуск: <?= $next<=time()?'ожидает обработчика':e(date('d.m.Y H:i:s',$next)) ?></p><?php endif; ?>
-  <p class="field__hint">Отправку проверяет существующий общий планировщик источников после обновления прайсов и сборки YML. Отдельный обработчик не нужен. Для одного интервала всего раздела перейдите в <a href="yml.php?tab=schedule">«Автообновление раздела»</a>.</p>
-</div>
-<?php else: ?><div class="card"><h2 class="card__title">Единый цикл YML</h2><p>Автоматическая отправка выполняется после обновления файлов и сборки фидов. <a href="yml.php?tab=schedule">Расписание и статус всего раздела</a>.</p></div><?php endif; ?>
-<div class="card">
-  <h2 class="card__title">Обновление остатков</h2>
-  <p class="card__hint">Артикул <code>offer_id</code> — из файла склада. Остаток — с витрины, с учётом числовых порогов, текстовых соответствий и резервного значения. При нескольких исходных складах используется приоритетный.</p>
-  <p class="field__hint">Нулевые остатки отправляются для обнуления на Ozon, даже если в YML включён фильтр нулей. Товары вне подготовленного списка не изменяются. Доступна ручная отправка и автообновление по расписанию. Сохранение настроек и загрузка списка складов не выполняют немедленную отправку.</p>
-  <form method="post"><?= Csrf::field() ?><button class="btn btn--ghost" name="action" value="ozon-preview">Подготовить обновление</button></form>
-  <?php if(is_array($ozonPlan)): ?>
-    <h3 class="a-subtitle">Проверка перед отправкой</h3>
-    <p>Склад: <b><?= e((string)($ozon['warehouse_name']??'')) ?></b> · <?= (int)($ozon['warehouse_id']??0) ?>. Позиций: <b><?= count($ozonPlan['rows']) ?></b>.</p>
-    <div class="table-wrap"><table class="table table--compact"><thead><tr><th>Артикул / offer_id</th><th>Остаток</th><th>Склад Ozon / warehouse_id</th></tr></thead><tbody><?php foreach(array_slice($ozonPlan['rows'],0,100)as $row): ?><tr><td><?= e($row['offer_id']) ?></td><td><?= (int)$row['stock'] ?></td><td><?= (int)$row['warehouse_id'] ?></td></tr><?php endforeach; ?></tbody></table></div>
-    <?php if(count($ozonPlan['rows'])>100): ?><p class="muted small">Показаны первые 100 позиций. Будет отправлен весь подготовленный список.</p><?php endif; ?>
-    <form method="post" class="form__actions"><?= Csrf::field() ?><input type="hidden" name="plan_id" value="<?= e($ozonPlan['id']) ?>"><button class="btn btn--primary" name="action" value="ozon-send">Отправить остатки в Ozon</button><span class="muted small">Предпросмотр действует 10 минут. При изменении данных потребуется повторная подготовка.</span></form>
-  <?php endif; ?>
-</div>
-<?php if(is_array($ozonResult)): ?>
-<div class="card">
-  <h2 class="card__title">Последняя отправка</h2>
-  <p><?= ($ozonResult['source']??'manual')==='auto'?'Автоматическая отправка':'Ручная отправка' ?></p>
-  <p>Client-Id: <?= e((string)($ozonResult['client_id']??'—')) ?> · Склад: <?= e((string)($ozonResult['warehouse_name']??'—')) ?></p>
-  <p><?= e((string)$ozonResult['at']) ?> · Подтверждено: <?= (int)$ozonResult['success'] ?> · Не подтверждено: <?= (int)$ozonResult['failed'] ?> · Не отправлено: <?= (int)$ozonResult['not_sent'] ?></p>
-  <?php if((int)$ozonResult['failed']>count($ozonResult['errors']??[])): ?><p class="muted small">Подробности приведены для первых ошибок; общий счётчик включает все неподтверждённые позиции.</p><?php endif; ?>
-  <?php foreach(($ozonResult['errors']??[])as $error): ?><p class="error-text"><b><?= e($error['offer_id']) ?></b>: <?= e($error['message']) ?></p><?php endforeach; ?>
-  <p class="field__hint">При сетевой ошибке результат части запроса может быть неизвестен. Немедленный повтор не выполняется. Если автообновление включено, следующая попытка произойдёт по расписанию с паузой не менее 60 секунд после ошибки.</p>
-</div>
-<?php endif; ?>

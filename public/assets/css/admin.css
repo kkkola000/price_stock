@@ -228,3 +228,50 @@ a { color: var(--accent); }
 .yml-advanced > summary { cursor: pointer; font-size: 15px; font-weight: 650; padding: 2px 0; }
 .yml-advanced-section { margin-top: 18px; }
 .yml-help__panel { max-height: 60vh; overflow-y: auto; }
+
+/* Dense warehouse/API forms; other admin pages keep their spacing. */
+.yml-page [hidden] { display: none !important; }
+.yml-page .yml-dense { padding: 16px; border-radius: 10px; }
+.yml-page .yml-dense .field { gap: 4px; margin: 0; min-width: 0; }
+.yml-page .yml-dense .field__label { display: flex; align-items: center; gap: 4px; min-height: 18px; font-size: 13px; }
+.yml-page .yml-dense .input { padding: 6px 10px; height: 34px; font-size: 14px; border-radius: 7px; width: 100%; }
+.yml-page .yml-dense input[type=file] { height: auto; max-width: 330px; font-size: 12px; }
+.yml-page .yml-dense select.input { appearance: auto; }
+.yml-page .yml-dense .btn { padding: 7px 11px; font-size: 13px; border-radius: 7px; }
+.yml-page .yml-dense .form__actions { margin: 0; gap: 8px; }
+.yml-page .yml-dense .check-inline { margin: 0; gap: 7px; font-size: 13px; }
+.yml-page .yml-dense .toolbar { margin: 0 0 10px; }
+.yml-section-heading { font-size: 15px; line-height: 1.3; margin: 0 0 10px; }
+.yml-compact-section + .yml-compact-section { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.yml-warehouse-basics { display: grid; grid-template-columns: 100px minmax(180px,2fr) minmax(80px,.8fr) 100px minmax(150px,1.2fr); gap: 12px; align-items: end; }
+.yml-warehouse-basics > .check-inline { min-height: 34px; }
+.yml-virtual-stock { max-width: 260px; margin-top: 12px !important; }
+.yml-page .yml-dense .warehouse-file-settings { border: 0; border-top: 1px solid var(--line); padding: 14px 0 0; margin: 14px 0 0; min-width: 0; }
+.yml-file-controls { display: grid; grid-template-columns: 160px 190px minmax(150px,1fr); gap: 12px; align-items: end; }
+.yml-saved-file { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 10px; margin-top: 12px; background: #f6f8fc; border: 1px solid var(--line); border-radius: 7px; }
+.yml-saved-file > div { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+.yml-mapping-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-bottom: 10px; }
+.yml-page .yml-dense .yml-mapping-field { display: grid; grid-template-columns: 135px minmax(70px,1fr); align-items: center; gap: 10px; }
+.yml-reading-options { border: 1px solid var(--line); border-radius: 7px; background: #f8f9fc; padding: 10px; margin-top: 12px; }
+.yml-reading-options > summary { cursor: pointer; font-size: 13px; font-weight: 650; }
+.yml-reading-options > summary > span { margin-left: 12px; font-weight: 400; }
+.yml-reading-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; margin: 12px 0; }
+.yml-form-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 14px; }
+.yml-delete-file { color: var(--danger); padding-left: 0; }
+.yml-api-heading .a-subtitle { margin: 0; }
+.yml-api-strip { display: flex; align-items: center; gap: 20px; }
+.yml-api-strip > a { font-size: 13px; }
+.yml-api-layout { display: grid; grid-template-columns: minmax(0,1.8fr) minmax(280px,1fr); gap: 14px; align-items: start; }
+.yml-api-layout > section, .yml-api-layout > aside { min-width: 0; }
+.yml-two-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.yml-api-preview { max-height: 300px; overflow: auto; }
+.yml-page .yml-api-preview .table td, .yml-page .yml-api-preview .table th { padding: 7px 10px; }
+.yml-preview-count, .yml-result-date { font-size: 13px; margin: 10px 0; overflow-wrap: anywhere; }
+.yml-result-list { margin: 0 0 12px; font-size: 13px; }
+.yml-result-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.yml-result-list dt { color: var(--muted); }.yml-result-list dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+@media(max-width:1000px) { .yml-warehouse-basics { grid-template-columns: repeat(3,minmax(0,1fr)); } .yml-api-layout { grid-template-columns: minmax(0,1fr); } }
+@media(max-width:650px) { .yml-warehouse-basics,.yml-file-controls,.yml-mapping-grid,.yml-two-fields { grid-template-columns: minmax(0,1fr); } .yml-reading-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .yml-saved-file { flex-direction: column; align-items: stretch; } .yml-api-strip { flex-wrap: wrap; gap: 8px; } .yml-form-footer .form__actions { width: 100%; } .yml-reading-options summary > span { display: block; margin: 4px 0 0; } }
+.yml-warehouse-head .a-subtitle { margin: 0; font-size: 18px; }
+.yml-warehouse-head .toolbar { margin: 6px 0; }
+.yml-warehouse-head > .breadcrumbs { display: inline-block; margin: 0 0 4px; }
